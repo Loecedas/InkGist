@@ -10,4 +10,4 @@ directory = "./.output/public"
 [[d1_databases]]
 binding = "DB"
 database_name = "inkgist-db"
-database_id = "your-d1-database-id-here"
+database_id = "429d55ee-7ccd-4808-8176-d2a5943dd6b3"
