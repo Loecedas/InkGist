@@ -8,9 +8,12 @@
 [![Nuxt](https://img.shields.io/badge/Nuxt-4.x-00DC82?logo=nuxt.js)](https://nuxt.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vuedotjs)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Demo](https://img.shields.io/badge/Demo-inkgist.baseye.org-000000?logo=googlechrome)](https://inkgist.baseye.org/)
 [![Tests](https://img.shields.io/badge/Tests-9%20Passed-10b981.svg)](./tests/test-suite.mjs)
 
 **墨萃 (InkGist) —— 基于 Nuxt 4 + Vue 3 的极简纯黑白风格 AI 网页速读工具与多用户智能书签管理系统**
+
+🌐 **在线演示**：[https://inkgist.baseye.org/](https://inkgist.baseye.org/)
 
 </div>
 
@@ -57,25 +60,27 @@
 
 ---
 
-## 🚀 快速上手
+## 🚀 快速上手与部署
 
-### 1. 克隆项目并安装依赖
+### 方案 A：本地 / VPS 私有化部署（推荐）
+
+项目默认内置本地轻量 JSON 持久化引擎，**无需安装 MySQL/Redis**：
+
+#### 1. 克隆项目并安装依赖
 
 ```bash
-git clone https://github.com/your-username/inkgist.git
-cd inkgist
+git clone https://github.com/Loecedas/InkGist.git
+cd InkGist
 npm install
 ```
 
-### 2. 配置环境变量
-
-复制环境变量模板文件并填写您的大模型 API 密钥：
+#### 2. 配置环境变量
 
 ```bash
 cp .env.example .env
 ```
 
-在 `.env` 中填写对应的 API Key（例如智谱 AI、DeepSeek 或 Gemini）：
+在 `.env` 中填写您拥有的大模型 API Key（智谱 AI、DeepSeek 或 Gemini 任填一个即可）：
 
 ```env
 ZHIPU_API_KEY=your_zhipu_api_key_here
@@ -83,26 +88,54 @@ ZHIPU_MODEL=glm-4.6v-flash
 DEFAULT_PROVIDER=auto
 ```
 
-### 3. 启动开发服务器
+#### 3. 启动开发与生产构建
 
-```bash
-npm run dev
-```
+- **开发模式**：
+  ```bash
+  npm run dev
+  ```
+  打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可开始使用。
 
-打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可开始使用！
+- **生产环境运行**：
+  ```bash
+  npm run build
+  node .output/server/index.mjs
+  # 或使用 PM2 常驻守护：
+  # pm2 start .output/server/index.mjs --name inkgist
+  ```
 
-### 4. 运行自动化测试套件
+- **运行自动化测试**：
+  ```bash
+  npm test
+  ```
 
-```bash
-npm test
-```
+---
 
-### 5. 生产环境构建
+### 方案 B：Cloudflare Workers + D1 边缘部署（0 成本部署）
 
-```bash
-npm run build
-npm run preview
-```
+1. **创建 Cloudflare D1 数据库**：
+   ```bash
+   npx wrangler d1 create inkgist-db
+   ```
+2. **初始化数据表**：
+   ```bash
+   npx wrangler d1 execute inkgist-db --file=./schema.sql
+   ```
+3. **在 `wrangler.json` 中填入 D1 数据库 ID**。
+4. **设置大模型密钥并发布**：
+   ```bash
+   npx wrangler secret put ZHIPU_API_KEY
+   npm run build
+   npx wrangler deploy
+   ```
+
+---
+
+### 🧩 浏览器扩展安装
+
+1. 打开 Chrome / Edge，进入扩展管理页（`chrome://extensions/` 或 `edge://extensions/`）；
+2. 开启右上角 **「开发者模式」**；
+3. 点击 **「加载已解压的扩展程序」**，选择项目中的 `extension/` 文件夹即可完成安装。
 
 ---
 

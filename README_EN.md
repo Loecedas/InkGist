@@ -8,9 +8,12 @@
 [![Nuxt](https://img.shields.io/badge/Nuxt-4.x-00DC82?logo=nuxt.js)](https://nuxt.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vuedotjs)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Demo](https://img.shields.io/badge/Demo-inkgist.baseye.org-000000?logo=googlechrome)](https://inkgist.baseye.org/)
 [![Tests](https://img.shields.io/badge/Tests-9%20Passed-10b981.svg)](./tests/test-suite.mjs)
 
 **InkGist (墨萃) — A minimalist monochrome AI web reading tool and multi-tenant smart bookmark system built with Nuxt 4 and Vue 3.**
+
+🌐 **Live Demo**: [https://inkgist.baseye.org/](https://inkgist.baseye.org/)
 
 </div>
 
@@ -57,23 +60,27 @@
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start & Deployment
 
-### 1. Clone & Install
+### Option A: Local / VPS Self-Hosted (Recommended)
+
+Default local JSON storage engine requires **no external database (zero MySQL/Redis dependency)**:
+
+#### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-username/inkgist.git
-cd inkgist
+git clone https://github.com/Loecedas/InkGist.git
+cd InkGist
 npm install
 ```
 
-### 2. Configure Environment
+#### 2. Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Add your API Key in `.env`:
+Add your API Key in `.env` (Zhipu AI, DeepSeek, or Gemini):
 
 ```env
 ZHIPU_API_KEY=your_zhipu_api_key_here
@@ -81,26 +88,54 @@ ZHIPU_MODEL=glm-4.6v-flash
 DEFAULT_PROVIDER=auto
 ```
 
-### 3. Run Development Server
+#### 3. Run Development Server or Production Build
 
-```bash
-npm run dev
-```
+- **Development Mode**:
+  ```bash
+  npm run dev
+  ```
+  Visit [http://localhost:3000](http://localhost:3000) in your browser.
 
-Visit [http://localhost:3000](http://localhost:3000) in your browser.
+- **Production Build**:
+  ```bash
+  npm run build
+  node .output/server/index.mjs
+  # Or run with PM2:
+  # pm2 start .output/server/index.mjs --name inkgist
+  ```
 
-### 4. Run Automated Tests
+- **Run Automated Tests**:
+  ```bash
+  npm test
+  ```
 
-```bash
-npm test
-```
+---
 
-### 5. Production Build
+### Option B: Cloudflare Workers + D1 Serverless Deployment
 
-```bash
-npm run build
-npm run preview
-```
+1. **Create Cloudflare D1 Database**:
+   ```bash
+   npx wrangler d1 create inkgist-db
+   ```
+2. **Execute Schema Migration**:
+   ```bash
+   npx wrangler d1 execute inkgist-db --file=./schema.sql
+   ```
+3. **Add Database ID to `wrangler.json`**.
+4. **Set Secrets and Deploy**:
+   ```bash
+   npx wrangler secret put ZHIPU_API_KEY
+   npm run build
+   npx wrangler deploy
+   ```
+
+---
+
+### 🧩 Browser Extension Setup
+
+1. Open Chrome or Edge and go to Extensions (`chrome://extensions/` or `edge://extensions/`);
+2. Enable **Developer mode** in the top-right corner;
+3. Click **Load unpacked** and select the `extension/` folder in this repo.
 
 ---
 
