@@ -4,16 +4,17 @@
 
 **极简黑白墨韵 · AI 网页智能速读与全功能多用户云端书签平台**
 
+<p align="center">
+  <b>简体中文</b> | <a href="./README_EN.md">English</a>
+</p>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-0f172a.svg)](./LICENSE)
 [![Nuxt](https://img.shields.io/badge/Nuxt-4.x-00DC82?logo=nuxt.js)](https://nuxt.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vuedotjs)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
-[![Demo](https://img.shields.io/badge/Demo-inkgist.baseye.org-000000?logo=googlechrome)](https://inkgist.baseye.org/)
 [![Tests](https://img.shields.io/badge/Tests-9%20Passed-10b981.svg)](./tests/test-suite.mjs)
 
 **墨萃 (InkGist) —— 基于 Nuxt 4 + Vue 3 的极简纯黑白风格 AI 网页速读工具与多用户智能书签管理系统**
-
-🌐 **在线演示**：[https://inkgist.baseye.org/](https://inkgist.baseye.org/)
 
 </div>
 
