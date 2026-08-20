@@ -1,0 +1,19 @@
+{
+  "name": "inkgist",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "test": "node --experimental-strip-types tests/test-suite.mjs"
+  },
+  "dependencies": {
+    "defuddle": "^0.19.2",
+    "nuxt": "^4.5.2",
+    "vue": "^3.5.41",
+    "vue-router": "^5.2.0"
+  }
+}

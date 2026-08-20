@@ -1,0 +1,37 @@
+# Nuxt / Nitro 构建产物与缓存
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+
+# Node.js 依赖包
+node_modules
+
+# 本地数据持久化数据库 (严防本地用户数据与书签外泄)
+server/data/*.json
+server/data/*.db*
+server/data/*.sqlite*
+
+# 日志文件
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 操作系统与 IDE 编辑器配置文件
+.DS_Store
+Thumbs.db
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.fleet
+
+# 本地私密环境变量配置文件 (严防 API 密钥外泄)
+.env
+.env.*
+!.env.example
+*.local

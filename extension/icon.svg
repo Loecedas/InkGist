@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+    <linearGradient id="inkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  
+  <!-- 外框圆角矩形 -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bgGrad)" stroke="#334155" stroke-width="2" filter="url(#shadow)"/>
+  
+  <!-- 核心墨萃极简墨滴/笔尖书签图标 -->
+  <g fill="none" stroke="url(#inkGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 笔尖/墨滴外轮廓 -->
+    <path d="M64 26 C48 48 38 68 38 82 C38 96.36 49.64 108 64 108 C78.36 108 90 96.36 90 82 C90 68 80 48 64 26 Z" fill="url(#inkGrad)" fill-opacity="0.15"/>
+    <!-- 笔尖中心中缝与气孔 -->
+    <line x1="64" y1="36" x2="64" y2="74" stroke="#ffffff" stroke-width="5"/>
+    <circle cx="64" cy="76" r="5" fill="#ffffff" stroke="none"/>
+  </g>
+</svg>
