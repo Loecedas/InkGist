@@ -637,8 +637,10 @@ export const useBookmarks = () => {
         await $fetch('/api/user/bookmarks', {
           method: 'DELETE',
           headers: getAuthHeaders(),
-          query: { id, url: targetUrl },
-          body: { id, url: targetUrl }
+          query: {
+            id,
+            url: targetUrl
+          }
         })
       } catch (err) {
         console.error('Failed to delete bookmark on server', err)

@@ -587,15 +587,21 @@ export const dbBookmarks = {
     writeJson(BOOKMARKS_FILE, bookmarks)
   },
   delete: async (id: string, userId: string, event?: H3Event): Promise<boolean> => {
+    if (!id || !userId) return false
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      const res = await d1.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').bind(id, userId).run()
-      return Boolean(res?.meta?.changes && res.meta.changes > 0)
+      try {
+        const res = await d1.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').bind(String(id), String(userId)).run()
+        return Boolean(res?.meta?.changes && res.meta.changes > 0)
+      } catch (err) {
+        console.error('D1 delete bookmark error:', err)
+        return false
+      }
     }
     const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
     const initialLen = bookmarks.length
-    const filtered = bookmarks.filter(b => !(b.id === id && b.user_id === userId))
+    const filtered = bookmarks.filter(b => !(b.id === String(id) && b.user_id === String(userId)))
     if (filtered.length !== initialLen) {
       writeJson(BOOKMARKS_FILE, filtered)
       return true
@@ -603,18 +609,25 @@ export const dbBookmarks = {
     return false
   },
   deleteByUrl: async (url: string, userId: string, event?: H3Event): Promise<boolean> => {
+    if (!url || !userId) return false
     const cleanUrl = (url || '').trim()
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      const res = await d1.prepare('DELETE FROM bookmarks WHERE user_id = ? AND (url = ? OR lower(url) = lower(?))').bind(userId, cleanUrl, cleanUrl).run()
-      return Boolean(res?.meta?.changes && res.meta.changes > 0)
+      try {
+        const altUrl = cleanUrl.endsWith('/') ? cleanUrl.slice(0, -1) : cleanUrl + '/'
+        const res = await d1.prepare('DELETE FROM bookmarks WHERE user_id = ? AND (url = ? OR url = ? OR lower(url) = lower(?) OR lower(url) = lower(?))').bind(String(userId), cleanUrl, altUrl, cleanUrl, altUrl).run()
+        return Boolean(res?.meta?.changes && res.meta.changes > 0)
+      } catch (err) {
+        console.error('D1 deleteByUrl error:', err)
+        return false
+      }
     }
     const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
     const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
     const targetNorm = norm(cleanUrl)
     const initialLen = bookmarks.length
-    const filtered = bookmarks.filter(b => !(b.user_id === userId && (b.url === cleanUrl || norm(b.url) === targetNorm)))
+    const filtered = bookmarks.filter(b => !(b.user_id === String(userId) && (b.url === cleanUrl || norm(b.url) === targetNorm)))
     if (filtered.length !== initialLen) {
       writeJson(BOOKMARKS_FILE, filtered)
       return true

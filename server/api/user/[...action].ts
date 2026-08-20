@@ -68,9 +68,14 @@ export default defineEventHandler(async (event) => {
     }
 
     if (method === 'DELETE') {
-      // 同时兼容 Query 参数 (?id=xxx&url=yyy) 与 JSON Body ({ id: xxx, url: yyy })
       const query = getQuery(event)
-      const body = await readBody(event).catch(() => null)
+      let body: any = null
+      const contentType = (event.node?.req?.headers?.['content-type'] || (event.headers?.get ? event.headers.get('content-type') : '') || '') as string
+      if (contentType.includes('application/json')) {
+        try {
+          body = await readBody(event)
+        } catch {}
+      }
       const targetId = (query?.id as string) || body?.id
       const targetUrl = (query?.url as string) || body?.url
       if (!targetId && !targetUrl) throw createError({ statusCode: 400, statusMessage: '缺少书签 ID 或网址' })
@@ -113,9 +118,14 @@ export default defineEventHandler(async (event) => {
     }
 
     if (method === 'DELETE') {
-      // 同时兼容 Query 参数 (?name=xxx) 与 JSON Body ({ name: xxx })
       const query = getQuery(event)
-      const body = await readBody(event).catch(() => null)
+      let body: any = null
+      const contentType = (event.node?.req?.headers?.['content-type'] || (event.headers?.get ? event.headers.get('content-type') : '') || '') as string
+      if (contentType.includes('application/json')) {
+        try {
+          body = await readBody(event)
+        } catch {}
+      }
       const targetName = (query?.name as string) || body?.name
       if (!targetName) throw createError({ statusCode: 400, statusMessage: '缺少分类名称' })
       await dbFolders.delete(String(targetName), user.id, event)
