@@ -96,7 +96,14 @@ export const useAuth = () => {
         }
         return null
       }
-    } catch {
+    } catch (err: any) {
+      if (err?.statusCode === 401 || err?.response?.status === 401 || err?.status === 401) {
+        currentUser.value = null
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(STORAGE_KEY_USER)
+          localStorage.removeItem(STORAGE_KEY_TOKEN)
+        }
+      }
       return currentUser.value
     } finally {
       isAuthChecked.value = true

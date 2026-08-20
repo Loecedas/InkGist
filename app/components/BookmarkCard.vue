@@ -35,7 +35,7 @@
           {{ bookmark.title }}
         </a>
       </div>
-      <span class="bm-date">{{ bookmark.createdAt || '2026/08/19' }}</span>
+      <span class="bm-date">{{ displayDate }}</span>
     </div>
 
     <div class="bm-sub-row">
@@ -245,6 +245,24 @@ const actions = computed(() => {
     .split('\n')
     .map(line => line.replace(/^[\s\*\-\•]*\[\s*\]\s*/, '').trim())
     .filter(Boolean)
+})
+
+const displayDate = computed(() => {
+  const raw = props.bookmark.createdAt
+  if (!raw) {
+    const d = new Date()
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+  }
+  try {
+    const d = new Date(raw)
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${year}/${month}/${day}`
+    }
+  } catch {}
+  return String(raw).replace(/-/g, '/')
 })
 </script>
 
