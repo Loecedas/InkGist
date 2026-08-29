@@ -279,7 +279,10 @@
                   </div>
 
                   <div class="result-title-and-url-section">
-                    <h2 class="result-display-title">{{ row.result?.title || row.url }}</h2>
+                    <div class="result-title-badge-row">
+                      <span v-if="row.folder" class="home-folder-chip" :title="`所属浏览器分类：${row.folder}`">📁 {{ row.folder }}</span>
+                      <h2 class="result-display-title">{{ row.result?.title || row.url }}</h2>
+                    </div>
                     <a :href="row.result?.url || row.url" target="_blank" rel="noopener noreferrer" class="result-display-url" title="点击访问原网页">
                       <span>{{ row.result?.url || row.url }}</span>
                       <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.external"></svg>
@@ -372,7 +375,13 @@ export interface InputRowItem {
   isGenerating?: boolean
   isTyping?: boolean
   streamedText?: string
-  errorMessage?: string
+  title?: string
+  folder?: string
+  isQueued: boolean
+  isGenerating: boolean
+  isTyping: boolean
+  streamedText: string
+  errorMessage: string
   isEditing?: boolean
   editableSummaryText?: string
   saved?: boolean
@@ -428,8 +437,8 @@ const processNextInQueue = () => {
   }
 }
 
-// 书签批量导入处理：从书签中勾选导入时不覆盖已有网址，一律新增；同时针对重复网址进行友好提示
-const handleImportBookmarksFromExt = (items: Array<{ url: string; title: string }>) => {
+// 书签批量导入处理：从书签中勾选导入时不覆盖已有网址，一律新增并完整保留所属文件夹分类
+const handleImportBookmarksFromExt = (items: Array<{ url: string; title: string; folder?: string }>) => {
   if (!items.length) return
 
   const norm = (u: string) => u.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
@@ -442,7 +451,7 @@ const handleImportBookmarksFromExt = (items: Array<{ url: string; title: string 
   }
 
   // 2. 过滤待导入项：排除自身重复项以及当前已有相同网址
-  const newItemsToAdd: Array<{ url: string; title: string }> = []
+  const newItemsToAdd: Array<{ url: string; title: string; folder?: string }> = []
   let duplicateCount = 0
 
   for (const it of items) {
@@ -477,6 +486,7 @@ const handleImportBookmarksFromExt = (items: Array<{ url: string; title: string 
   ) {
     inputRows.value[0].url = newItemsToAdd[0].url
     inputRows.value[0].title = newItemsToAdd[0].title
+    inputRows.value[0].folder = newItemsToAdd[0].folder
     inputRows.value[0].errorMessage = ''
     startIdx = 1
   }
@@ -488,6 +498,7 @@ const handleImportBookmarksFromExt = (items: Array<{ url: string; title: string 
       id: Math.random().toString(36).substring(2, 9),
       url: it.url,
       title: it.title,
+      folder: it.folder,
       isQueued: false,
       isGenerating: false,
       isTyping: false,
@@ -544,7 +555,7 @@ const handleCancelBatchAll = () => {
   activeConcurrentCount.value = 0
 }
 
-// 一键全部保存到书签
+// 一键全部保存到书签并自动按原浏览器分类归档
 const handleBatchSaveAllToBookmarks = async () => {
   const completedUnsaved = inputRows.value.filter(r => !!r.result && !r.saved)
   if (!completedUnsaved.length) return
@@ -556,6 +567,7 @@ const handleBatchSaveAllToBookmarks = async () => {
         summary: row.result.detailedSummary,
         tags: row.result.tags,
         description: row.result.title,
+        folder: row.folder ? row.folder.trim() : undefined,
         icon: 'bookmark',
         color: '#0f172a'
       })
@@ -939,16 +951,18 @@ const finishEditRowSummary = (row: InputRowItem) => {
 
 const handleSaveRowToBookmark = async (row: InputRowItem) => {
   if (!row.result) return
+  const folderName = row.folder ? row.folder.trim() : undefined
   const saveRes = await addBookmark({
     title: row.result.title,
     url: row.result.url,
     summary: row.result.detailedSummary,
     tags: row.result.tags,
     description: row.result.title,
+    folder: folderName,
     icon: 'bookmark',
     color: '#0f172a'
   })
-  row.saveToastText = saveRes?.isUpdate ? '已更新原有书签' : '已保存至书签'
+  row.saveToastText = saveRes?.isUpdate ? '已更新原有书签' : (folderName ? `已保存至 [${folderName}]` : '已保存至书签')
   row.saved = true
   setTimeout(() => {
     row.saved = false
@@ -1656,6 +1670,27 @@ const formatMdToHtml = (textSource: string) => {
 
 .is-collapsed-card .result-title-and-url-section {
   padding: 0.65rem 0.85rem;
+}
+
+.result-title-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+
+.home-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  white-space: nowrap;
 }
 
 .result-display-title {

@@ -6,7 +6,7 @@ export default defineNuxtConfig({
     compatibilityVersion: 3
   },
   nitro: {
-    preset: 'cloudflare_module'
+    preset: process.env.NITRO_PRESET || 'node-server'
   },
   srcDir: 'app',
   runtimeConfig: {
@@ -27,6 +27,10 @@ export default defineNuxtConfig({
 
     // 抓取模型
     jinaApiKey: process.env.JINA_API_KEY || '',
+
+    // Karakeep (Hoarder) 同步
+    karakeepInstanceUrl: process.env.KARAKEEP_INSTANCE_URL || 'https://cloud.karakeep.app',
+    karakeepApiKey: process.env.KARAKEEP_API_KEY || '',
 
     // 通用兼容
     aiApiKey: process.env.AI_API_KEY || '',

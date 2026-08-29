@@ -111,9 +111,13 @@ export function validateUsername(raw: string): { valid: boolean; clean: string; 
 // =============================================================================
 let DATA_DIR = ''
 try {
-  if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
-    DATA_DIR = join(process.cwd(), 'server', 'data')
-    if (typeof existsSync === 'function' && !existsSync(DATA_DIR)) {
+  if (typeof process !== 'undefined') {
+    if (process.env.DATA_DIR && typeof process.env.DATA_DIR === 'string' && process.env.DATA_DIR.trim()) {
+      DATA_DIR = process.env.DATA_DIR.trim()
+    } else if (typeof process.cwd === 'function') {
+      DATA_DIR = join(process.cwd(), 'server', 'data')
+    }
+    if (DATA_DIR && typeof existsSync === 'function' && !existsSync(DATA_DIR)) {
       mkdirSync(DATA_DIR, { recursive: true })
     }
   }
@@ -586,6 +590,59 @@ export const dbBookmarks = {
     else bookmarks.unshift(bm)
     writeJson(BOOKMARKS_FILE, bookmarks)
   },
+  batchUpsert: async (bms: BookmarkRow[], userId: string, event?: H3Event): Promise<number> => {
+    if (!bms || bms.length === 0) return 0
+    const d1 = getD1Database(event)
+    if (d1) {
+      await ensureD1Tables(d1)
+      const stmts = bms.map(bm => d1.prepare(`INSERT INTO bookmarks (id, user_id, title, url, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          url = excluded.url,
+          icon = excluded.icon,
+          description = excluded.description,
+          summary = excluded.summary,
+          tags = excluded.tags,
+          folder = excluded.folder,
+          color = excluded.color,
+          is_pinned = excluded.is_pinned,
+          is_favorite = excluded.is_favorite`
+      ).bind(
+        bm.id,
+        userId,
+        bm.title,
+        bm.url,
+        bm.icon || 'bookmark',
+        bm.description || '',
+        bm.summary || '',
+        JSON.stringify(bm.tags || []),
+        bm.folder || null,
+        bm.color || '#0f172a',
+        bm.is_pinned ? 1 : 0,
+        bm.is_favorite ? 1 : 0,
+        bm.created_at
+      ))
+      for (let i = 0; i < stmts.length; i += 50) {
+        await d1.batch(stmts.slice(i, i + 50))
+      }
+      return bms.length
+    }
+    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
+    const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
+    for (const bm of bms) {
+      bm.user_id = userId
+      const targetNorm = norm(bm.url)
+      const idx = bookmarks.findIndex(b => b.user_id === userId && (b.id === bm.id || norm(b.url) === targetNorm))
+      if (idx !== -1) {
+        bookmarks[idx] = bm
+      } else {
+        bookmarks.unshift(bm)
+      }
+    }
+    writeJson(BOOKMARKS_FILE, bookmarks)
+    return bms.length
+  },
   delete: async (id: string, userId: string, event?: H3Event): Promise<boolean> => {
     if (!id || !userId) return false
     const d1 = getD1Database(event)
@@ -659,6 +716,31 @@ export const dbFolders = {
       folders.push(folder)
       writeJson(FOLDERS_FILE, folders)
     }
+  },
+  batchInsert: async (newFolders: FolderRow[], userId: string, event?: H3Event): Promise<number> => {
+    if (!newFolders || newFolders.length === 0) return 0
+    const d1 = getD1Database(event)
+    if (d1) {
+      await ensureD1Tables(d1)
+      const stmts = newFolders.map(f => d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(f.id, userId, f.name, f.created_at))
+      for (let i = 0; i < stmts.length; i += 50) {
+        await d1.batch(stmts.slice(i, i + 50))
+      }
+      return newFolders.length
+    }
+    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
+    let added = 0
+    for (const f of newFolders) {
+      f.user_id = userId
+      if (!folders.some(existing => existing.user_id === userId && existing.name === f.name)) {
+        folders.push(f)
+        added++
+      }
+    }
+    if (added > 0) {
+      writeJson(FOLDERS_FILE, folders)
+    }
+    return added
   },
   delete: async (name: string, userId: string, event?: H3Event): Promise<void> => {
     const d1 = getD1Database(event)
@@ -986,6 +1068,7 @@ export async function callLlmService(
     if (p === 'zhipu' && config.zhipuApiKey) activeProvider = 'zhipu'
     else if (p === 'deepseek' && config.deepseekApiKey) activeProvider = 'deepseek'
     else if (p === 'gemini' && config.geminiApiKey) activeProvider = 'gemini'
+    else if (p === 'custom' && config.aiApiKey) activeProvider = 'custom'
   }
 
   if (!activeProvider) {
@@ -997,6 +1080,7 @@ export async function callLlmService(
 
   if (!activeProvider) return null
 
+  // 1. 智谱 AI
   if (activeProvider === 'zhipu') {
     const apiKey = config.zhipuApiKey?.trim()
     const preferredModel = config.zhipuModel || 'glm-4.6v-flash'
@@ -1005,7 +1089,7 @@ export async function callLlmService(
       try {
         const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
           method: 'POST',
-          signal: AbortSignal.timeout(28000), // 28秒防挂起熔断
+          signal: AbortSignal.timeout(28000),
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
           body: JSON.stringify({
             model,
@@ -1023,13 +1107,14 @@ export async function callLlmService(
     }
   }
 
+  // 2. DeepSeek
   if (activeProvider === 'deepseek') {
     const apiKey = config.deepseekApiKey?.trim()
     const model = config.deepseekModel || 'deepseek-chat'
     try {
       const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
-        signal: AbortSignal.timeout(28000), // 28秒防挂起熔断
+        signal: AbortSignal.timeout(28000),
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
           model,
@@ -1046,6 +1131,7 @@ export async function callLlmService(
     }
   }
 
+  // 3. Google Gemini
   if (activeProvider === 'gemini') {
     const apiKey = config.geminiApiKey?.trim()
     const model = config.geminiModel || 'gemini-2.0-flash'
@@ -1053,7 +1139,7 @@ export async function callLlmService(
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
       const response = await fetch(url, {
         method: 'POST',
-        signal: AbortSignal.timeout(28000), // 28秒防挂起熔断
+        signal: AbortSignal.timeout(28000),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
@@ -1066,6 +1152,40 @@ export async function callLlmService(
       if (text?.trim()) return { text: text.trim(), providerName: 'Google Gemini', modelName: model }
     } catch (err) {
       console.warn(`Gemini 调用异常:`, err)
+    }
+  }
+
+  // 4. 自定义兼容模型
+  if (activeProvider === 'custom') {
+    const baseUrl = (config.aiBaseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '')
+    const apiKey = config.aiApiKey?.trim() || ''
+    const model = config.aiModel?.trim() || 'gpt-4o-mini'
+    const targetUrl = baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl}/chat/completions`
+    try {
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        signal: AbortSignal.timeout(28000),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPromptText }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        })
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const text = data?.choices?.[0]?.message?.content
+        if (text?.trim()) return { text: text.trim(), providerName: '自定义大模型', modelName: model }
+      }
+    } catch (err) {
+      console.warn(`自定义模型 [${model}] 调用异常:`, err)
     }
   }
 

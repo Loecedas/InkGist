@@ -13,6 +13,8 @@
             <div class="compact-search-box">
               <svg class="svg-icon search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.search"></svg>
               <input
+                id="bookmark-search-input"
+                name="searchQuery"
                 v-model="searchQuery"
                 type="text"
                 placeholder="搜索书签标题、网址或内容..."
@@ -28,23 +30,45 @@
             </div>
 
             <!-- 桌面端列数切换 -->
-            <div class="column-switcher" title="切换每行排布数量">
-              <span class="switcher-text">每行排布:</span>
-              <button
-                v-for="col in ([1, 2, 3] as const)"
-                :key="col"
-                :class="['col-btn', `col-btn-${col}`, { active: columns === col }]"
-                :title="`一行显示 ${col} 个书签`"
-                @click="setColumns(col)"
-              >
-                <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[`grid-${col}`]"></svg>
-                <span>{{ col === 1 ? '1列(详细)' : `${col}列` }}</span>
-              </button>
-            </div>
+            <ClientOnly>
+              <div class="column-switcher" title="切换每行排布数量">
+                <span class="switcher-text">每行排布:</span>
+                <button
+                  v-for="col in ([1, 2, 3] as const)"
+                  :key="col"
+                  :class="['col-btn', `col-btn-${col}`, { active: columns === col }]"
+                  :title="`一行显示 ${col} 个书签`"
+                  @click="setColumns(col)"
+                >
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[`grid-${col}`]"></svg>
+                  <span>{{ col === 1 ? '1列(详细)' : `${col}列` }}</span>
+                </button>
+              </div>
+            </ClientOnly>
           </div>
 
-          <!-- 右上角操作区：退出登录 + 主题切换 + 返回首页 -->
+          <!-- 右上角操作区：批量管理 + 导出 + 退出登录 + 主题切换 + 返回首页 -->
           <div class="header-right-actions">
+            <button
+              class="nav-action-btn"
+              :class="{ active: isSelectMode }"
+              title="批量选择与管理书签"
+              @click="toggleSelectMode"
+            >
+              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.checkSquare"></svg>
+              <span>{{ isSelectMode ? '完成选择' : '批量管理' }}</span>
+            </button>
+
+
+            <button
+              class="nav-action-btn"
+              title="导出为标准 Netscape HTML 或 Markdown 知识库"
+              @click="isExportModalOpen = true"
+            >
+              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.download"></svg>
+              <span>导出</span>
+            </button>
+
             <button class="nav-logout-btn" title="退出登录" @click="handleLogout">
               <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.logout"></svg>
               <span>退出登录</span>
@@ -250,6 +274,21 @@
           @create-and-assign="handleCreateAndAssignFolder"
         />
 
+        <!-- 导出书签弹窗 (全量 / 分类 / 勾选导出) -->
+        <ExportBookmarkModal
+          v-model="isExportModalOpen"
+          :all-bookmarks="bookmarks"
+          :active-folder="activeFolder"
+          :selected-bookmark-ids="selectedBookmarkIds"
+          @exported="handleExported"
+        />
+
+        <!-- 导入书签弹窗 (直接从书签页一键导入与建分类) -->
+        <ExtensionInstallModal
+          v-model="isImportModalOpen"
+          @import-bookmarks="handleImportFromModal"
+        />
+
         <!-- 空状态 -->
         <div v-if="filteredAndSortedBookmarks.length === 0" class="empty-state">
           <svg class="svg-icon empty-icon" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
@@ -271,6 +310,8 @@
             :is-editing="editingBookmarkId === bm.id"
             :edit-text="inlineEditText"
             :is-dragging="draggedBookmarkId === bm.id"
+            :is-select-mode="isSelectMode"
+            :is-selected="selectedBookmarkIds.has(bm.id)"
             @dragstart="handleDragStart"
             @dragend="handleDragEnd"
             @long-press="handleMobileLongPress"
@@ -278,6 +319,7 @@
             @filter-folder="activeFolder = $event"
             @remove-from-folder="handleRemoveBmFromFolder"
             @toggle-pin="togglePin"
+            @toggle-select="toggleSelectBookmark"
             @start-inline-edit="startInlineEdit"
             @cancel-inline-edit="cancelInlineEdit"
             @save-inline-edit="saveInlineEdit"
@@ -295,6 +337,30 @@
       </div>
     </main>
 
+    <!-- 批量管理底部悬浮操作栏 -->
+    <div v-if="isSelectMode" class="floating-bulk-bar">
+      <div class="bulk-info-group">
+        <span class="bulk-stats">已选 <strong>{{ selectedBookmarkIds.size }}</strong> 项</span>
+        <button class="btn-bulk-act" @click="selectAllInCurrentView">
+          {{ selectedBookmarkIds.size >= displayedBookmarks.length && displayedBookmarks.length > 0 ? '取消全选' : '全选当前' }}
+        </button>
+      </div>
+
+      <div class="bulk-actions-group">
+        <button class="btn-bulk-act btn-primary-bulk" :disabled="selectedBookmarkIds.size === 0" @click="isExportModalOpen = true">
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.download"></svg>
+          <span>导出所选 ({{ selectedBookmarkIds.size }})</span>
+        </button>
+
+        <button class="btn-bulk-act btn-danger-bulk" :disabled="selectedBookmarkIds.size === 0" @click="batchDeleteSelected">
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.trash"></svg>
+          <span>批量删除</span>
+        </button>
+
+        <button class="btn-bulk-act" @click="toggleSelectMode">退出管理</button>
+      </div>
+    </div>
+
     <!-- 全局轻量 Toast 提示 -->
     <div v-if="toastMessage" class="toast-notification-pill">
       <span>{{ toastMessage }}</span>
@@ -307,6 +373,8 @@ import { ref, computed } from 'vue'
 import BookmarkCard from '../components/BookmarkCard.vue'
 import RenameFolderModal from '../components/RenameFolderModal.vue'
 import MobileFolderSelectModal from '../components/MobileFolderSelectModal.vue'
+import ExportBookmarkModal from '../components/ExportBookmarkModal.vue'
+import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
 import { useAuth, useBookmarks, useTheme, ICONS, type Bookmark } from './state'
 
 const { logout } = useAuth()
@@ -324,10 +392,68 @@ const {
   removeBookmarkFromFolder,
   getBookmarksInFolder,
   setColumns,
+  importBookmarksBatch,
+  addBookmark,
   updateBookmark,
   deleteBookmark,
   togglePin
 } = useBookmarks()
+
+// 导出与批量选择状态
+const isExportModalOpen = ref(false)
+const isImportModalOpen = ref(false)
+const isSelectMode = ref(false)
+const selectedBookmarkIds = ref<Set<string>>(new Set())
+
+const toggleSelectMode = () => {
+  isSelectMode.value = !isSelectMode.value
+  if (!isSelectMode.value) {
+    selectedBookmarkIds.value.clear()
+  }
+}
+
+const toggleSelectBookmark = (id: string) => {
+  if (selectedBookmarkIds.value.has(id)) {
+    selectedBookmarkIds.value.delete(id)
+  } else {
+    selectedBookmarkIds.value.add(id)
+  }
+}
+
+const selectAllInCurrentView = () => {
+  const allInView = displayedBookmarks.value.map(b => b.id)
+  const isAllChosen = allInView.every(id => selectedBookmarkIds.value.has(id))
+  if (isAllChosen) {
+    allInView.forEach(id => selectedBookmarkIds.value.delete(id))
+  } else {
+    allInView.forEach(id => selectedBookmarkIds.value.add(id))
+  }
+}
+
+const batchDeleteSelected = () => {
+  const count = selectedBookmarkIds.value.size
+  if (count === 0) return
+  if (!confirm(`确定要删除选中的 ${count} 条书签吗？`)) return
+  selectedBookmarkIds.value.forEach(id => {
+    deleteBookmark(id)
+  })
+  selectedBookmarkIds.value.clear()
+  isSelectMode.value = false
+  showToast(`已批量删除 ${count} 条书签`)
+}
+
+const handleExported = (count: number) => {
+  showToast(`已成功导出 ${count} 条书签 HTML 文件`)
+  if (isSelectMode.value) {
+    isSelectMode.value = false
+    selectedBookmarkIds.value.clear()
+  }
+}
+
+const handleImportFromModal = async (items: any[]) => {
+  const res = await importBookmarksBatch(items)
+  showToast(`已成功批量导入 ${res.count} 条书签并自动归类！`)
+}
 
 // 海量书签平滑分批渲染 (性能优化)
 const displayLimit = ref(40)
@@ -637,6 +763,9 @@ const extractActions = (bm: Bookmark): string[] => {
 }
 
 .compact-search-box input {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding-left: 2rem;
   padding-right: 1.75rem;
   font-size: 0.8125rem;
@@ -645,6 +774,7 @@ const extractActions = (bm: Bookmark): string[] => {
   border-radius: var(--radius-full);
   border: 1px solid var(--border-subtle);
   color: var(--text-main);
+  box-sizing: border-box;
 }
 
 .search-icon {
@@ -684,8 +814,10 @@ const extractActions = (bm: Bookmark): string[] => {
 .col-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.2rem 0.5rem;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0 0.55rem;
+  height: 26px;
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-muted);
@@ -693,6 +825,17 @@ const extractActions = (bm: Bookmark): string[] => {
   border: none;
   background: transparent;
   cursor: pointer;
+  line-height: 1;
+}
+.col-btn .svg-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.col-btn span {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
 }
 .col-btn.active {
   background-color: var(--primary);
@@ -706,19 +849,44 @@ const extractActions = (bm: Bookmark): string[] => {
   flex-shrink: 0;
 }
 
-.nav-logout-btn {
+.nav-logout-btn,
+.theme-toggle-btn,
+.nav-switch-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
-  padding: 0.38rem 0.75rem;
+  height: 32px;
+  padding: 0 0.75rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--text-muted);
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.nav-logout-btn .svg-icon,
+.theme-toggle-btn .svg-icon,
+.nav-switch-btn .svg-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.nav-logout-btn span,
+.theme-toggle-btn span,
+.nav-switch-btn span {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.nav-logout-btn {
+  color: var(--text-muted);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
 }
 .nav-logout-btn:hover {
   color: var(--danger);
@@ -727,18 +895,9 @@ const extractActions = (bm: Bookmark): string[] => {
 }
 
 .theme-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.38rem 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
   color: var(--text-main);
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
 }
 .theme-toggle-btn:hover {
   border-color: var(--text-main);
@@ -746,18 +905,11 @@ const extractActions = (bm: Bookmark): string[] => {
 }
 
 .nav-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.38rem 0.85rem;
-  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--primary-contrast) !important;
   background-color: var(--primary);
   border: 1px solid var(--primary);
-  border-radius: var(--radius-full);
   text-decoration: none;
-  box-shadow: var(--shadow-sm);
 }
 .nav-switch-btn:hover {
   background-color: var(--primary-hover);
@@ -922,12 +1074,14 @@ const extractActions = (bm: Bookmark): string[] => {
 }
 
 .folder-hover-dropdown {
-  width: 290px;
+  min-width: 320px;
+  max-width: 380px;
+  width: max-content;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
-  padding: 0.75rem;
+  padding: 0.75rem 0.85rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -939,47 +1093,69 @@ const extractActions = (bm: Bookmark): string[] => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 0.4rem;
+  gap: 0.75rem;
+  padding-bottom: 0.45rem;
   border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
 }
 
 .dropdown-title-group {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 
 .dropdown-folder-title {
   font-size: 0.8125rem;
   font-weight: 700;
   color: var(--text-main);
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
 }
 
 .dropdown-count-badge {
   font-size: 0.6875rem;
   color: var(--text-muted);
   background-color: var(--bg-surface-subtle);
-  padding: 0.1rem 0.4rem;
+  padding: 0.12rem 0.45rem;
   border-radius: var(--radius-full);
+  white-space: nowrap;
+  word-break: keep-all;
+  flex-shrink: 0;
 }
 
 .dropdown-actions-group {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .btn-dropdown-action {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.25rem;
   font-size: 0.6875rem;
-  padding: 0.15rem 0.35rem;
+  padding: 0.2rem 0.45rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background-color: var(--bg-surface-subtle);
   color: var(--text-muted);
   cursor: pointer;
+  white-space: nowrap;
+  word-break: keep-all;
+  flex-shrink: 0;
+}
+.btn-dropdown-action span {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
 }
 .btn-dropdown-action:hover {
   color: var(--text-main);
@@ -1201,10 +1377,14 @@ const extractActions = (bm: Bookmark): string[] => {
 .cards-grid {
   display: grid;
   gap: 1.25rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
-.grid-cols-1 { grid-template-columns: 1fr; }
-.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-cols-1 { grid-template-columns: minmax(0, 1fr) !important; }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 
 .bm-rich-card {
   background-color: var(--bg-surface);
@@ -1523,122 +1703,195 @@ const extractActions = (bm: Bookmark): string[] => {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* 1024 尺寸 (大于 768px 且 小于等于 1024px)：使用 1024 的显示方法，不显示一行 3 列的按钮 */
+/* 1024 尺寸 (大于 768px 且 小于等于 1024px)：
+   第 1 行：左侧 Logo 图标，右侧 操作功能按钮群；
+   第 2 行：左侧 搜索输入框充分向右拉伸充满，右侧 直接贴紧切换按钮左侧 (中间绝无多余空白，切换按钮稳定在最右侧) */
 @media (min-width: 769px) and (max-width: 1024px) {
   .header-main-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 0.65rem 0.5rem !important;
+    width: 100% !important;
   }
+
   .header-left-group {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex: 1;
+    display: contents !important;
   }
+
+  /* 第 1 行左侧：Logo 图标 */
+  .top-left-icon-box {
+    order: 1 !important;
+    flex: 0 0 auto !important;
+  }
+
+  /* 第 1 行右侧：右上角操作按钮群 (靠最右端对齐) */
+  .header-right-actions {
+    order: 2 !important;
+    margin-left: auto !important;
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.45rem !important;
+    white-space: nowrap !important;
+  }
+
+  /* 第 2 行左侧：长搜索框 (从第二行开始充分拉伸充满，右侧直接紧贴切换按钮左侧) */
   .compact-search-box {
-    width: 220px;
+    order: 3 !important;
+    flex: 1 1 calc(100% - 240px) !important;
+    min-width: 200px !important;
+    max-width: none !important;
+    width: auto !important;
+    display: flex !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+  }
+  .compact-search-box input {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: 1 1 100% !important;
+    box-sizing: border-box !important;
   }
   .compact-search-box:focus-within {
-    width: 280px;
+    width: auto !important;
+    flex: 1 1 calc(100% - 240px) !important;
   }
+
+  /* 第 2 行右侧：每行排布切换按钮 (位置在第二行最右侧，紧邻搜索框右边，中间绝不留空) */
+  .column-switcher {
+    order: 4 !important;
+    flex: 0 0 auto !important;
+    display: inline-flex !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+  }
+
+  .switcher-text {
+    white-space: nowrap !important;
+  }
+
   /* 1024 尺寸不显示一行显示 3 个的按钮 */
   .col-btn-3 {
     display: none !important;
   }
+
   /* 若当前选中为 3 列，在 1024 尺寸自动适配为 2 列 */
   .grid-cols-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
-/* 375, 425, 768 尺寸 (小于等于 768px)：
-   1. 不显示排布切换器 (图一)
-   2. 都只一行显示一个卡片
-   3. 图一所在部分换行显示：第1行书签图标与右上角三个按钮对齐，第2行搜索框换行占满整行 */
+/* 375, 425, 768 及所有移动端/小屏尺寸 (小于等于 768px)：
+   1. 第 1 行：左侧 Logo 图标，右侧 5 个操作按钮 (纯图标模式，严密对齐锁定在第一行，绝不折行)
+   2. 第 2 行：搜索框独立占满整行 (100% 宽度)
+   3. 列数切换器隐藏，卡片一律单列全宽整齐平铺
+   4. 文件夹纯点击切换，隐藏悬停浮窗 */
 @media (max-width: 768px) {
+  .sticky-bookmarks-header {
+    width: 100% !important;
+    overflow-x: clip !important;
+  }
+
   .header-inner-content {
-    padding: 0.65rem 0.85rem 0.35rem;
+    padding: 0.75rem 1rem 0.35rem !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   .header-main-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.65rem 0.5rem;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 0.65rem 0.35rem !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   .header-left-group {
-    display: contents;
+    display: contents !important;
   }
 
   /* 第 1 行左侧：书签图标 */
   .top-left-icon-box {
-    order: 1;
+    order: 1 !important;
+    flex: 0 0 auto !important;
   }
 
-  /* 第 1 行右侧：右上角三个按钮 (退出登录 + 切换主题 + 首页)，与书签图标同一行对齐 */
+  /* 第 1 行右侧：右上角操作按钮群 (纯图标模式，绝无文字折行溢出) */
   .header-right-actions {
-    order: 2;
-    margin-left: auto;
+    order: 2 !important;
+    margin-left: auto !important;
+    flex: 0 0 auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.3rem !important;
+    flex-wrap: nowrap !important;
   }
 
-  /* 第 2 行：搜索框换行占满整行 */
-  .compact-search-box {
-    order: 3;
-    width: 100% !important;
-    max-width: 100%;
-  }
-
-  .compact-search-box:focus-within {
-    width: 100% !important;
-  }
-
-  /* 375, 425, 768 尺寸都不显示图一 (每行排布切换器) */
-  .column-switcher {
-    display: none !important;
-  }
-
-  /* 375, 425, 768 尺寸都只一行显示一个 */
-  .cards-grid,
-  .grid-cols-1,
-  .grid-cols-2,
-  .grid-cols-3 {
-    grid-template-columns: 1fr !important;
-  }
-
-  .bookmarks-main-content {
-    padding: 0.85rem 0.75rem 3rem;
-  }
-}
-
-/* 375, 425 尺寸专属：
-   1. 顶部操作栏三个按钮 (退出登录 + 跟随系统 + 首页) 仅显示图标，不显示文字
-   2. 文件夹不需要有悬停窗口 (纯点击切换模式)
-   3. 链接和按钮换行显示 (Row 1: 网址链接, Row 2: 三个操作按钮)，避免文字挤压换行
-   4. 当前文件夹提示条换行显示 (Row 1: 文件夹信息, Row 2: 三个操作按钮)，文字单行平铺不折叠 */
-@media (max-width: 480px) {
-  /* 顶部导航按钮：375 和 425 尺寸下仅显示图标，隐藏文字 */
+  .header-right-actions .nav-action-btn span,
   .header-right-actions .nav-logout-btn span,
   .header-right-actions .theme-toggle-btn span,
   .header-right-actions .nav-switch-btn span {
     display: none !important;
   }
 
+  .header-right-actions .nav-action-btn,
   .header-right-actions .nav-logout-btn,
   .header-right-actions .theme-toggle-btn,
   .header-right-actions .nav-switch-btn {
-    padding: 0.42rem !important;
-    min-width: 32px;
-    height: 32px;
-    justify-content: center;
-    border-radius: var(--radius-full);
+    padding: 0 !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: var(--radius-full) !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
   }
 
-  .header-right-actions {
-    gap: 0.35rem !important;
+  /* 第 2 行：搜索框换行占满整行 */
+  .compact-search-box {
+    order: 3 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .compact-search-box input {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .compact-search-box:focus-within {
+    width: 100% !important;
+  }
+
+  /* 768px 以下不显示列数切换器 */
+  .column-switcher {
+    display: none !important;
+  }
+
+  /* 768px 以下卡片单列全宽显示，以屏幕视口尺寸为准，绝不超出外侧 */
+  .cards-grid,
+  .grid-cols-1,
+  .grid-cols-2,
+  .grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
   }
 
   .folder-hover-dropdown-bridge {
@@ -1664,6 +1917,12 @@ const extractActions = (bm: Bookmark): string[] => {
     font-size: 0.8125rem !important;
   }
 
+  .bookmarks-main-content {
+    padding: 0.85rem 1rem 3rem !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
   .folder-stats-text {
     white-space: nowrap !important;
     font-size: 0.75rem !important;
@@ -1740,6 +1999,131 @@ const extractActions = (bm: Bookmark): string[] => {
   pointer-events: none;
   border: 1px solid var(--border-subtle);
   animation: toastFloatUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* 顶部操作栏功能按钮 */
+.nav-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 32px;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.nav-action-btn .svg-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.nav-action-btn span {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+.nav-action-btn:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+}
+.nav-action-btn.active {
+  background-color: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
+}
+
+/* 底部悬浮批量管理栏 */
+.floating-bulk-bar {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  padding: 0.6rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  animation: bulkBarSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes bulkBarSlideUp {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.bulk-info-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bulk-stats {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+.bulk-stats strong {
+  color: var(--primary);
+}
+
+.bulk-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-bulk-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-full);
+  font-size: 0.775rem;
+  font-weight: 500;
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-bulk-act:hover:not(:disabled) {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+}
+.btn-bulk-act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary-bulk {
+  background-color: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
+}
+
+.btn-primary-bulk:hover:not(:disabled) {
+  background-color: #334155 !important;
+  color: #ffffff !important;
+  border-color: #334155 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-danger-bulk:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
 }
 
 @keyframes toastFloatUp {

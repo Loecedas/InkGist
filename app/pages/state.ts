@@ -1,5 +1,6 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useCookie, useRequestFetch } from '#app'
+export { generateNetscapeBookmarkHtml, downloadBookmarksAsHtml, parseBookmarkHtml, type BookmarkItem } from '../utils/bookmark-io'
 
 // =============================================================================
 // 1. 用户鉴权与免登持久化 (useAuth)
@@ -318,10 +319,21 @@ const deduplicateBookmarks = (list: Bookmark[]): Bookmark[] => {
   return unique
 }
 
+let initialColumns: GridColumns = 1
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_COLUMNS)
+    if (saved) {
+      const num = Number(saved)
+      if (num === 1 || num === 2 || num === 3) initialColumns = num as GridColumns
+    }
+  } catch {}
+}
+
 const bookmarks = ref<Bookmark[]>([])
 const folders = ref<BookmarkFolder[]>([])
 const activeFolder = ref<string>('all')
-const columns = ref<GridColumns>(1)
+const columns = ref<GridColumns>(initialColumns)
 const searchQuery = ref('')
 const currentSort = ref<SortOption>('time-desc')
 const isLoaded = ref(false)
@@ -329,9 +341,35 @@ const isLoaded = ref(false)
 export const useBookmarks = () => {
   const { isLoggedIn, currentUser, fetchCurrentUser } = useAuth()
 
+  // 跨 SSR/Client 服务端与客户端一致的双向 Cookie 同步
+  try {
+    const cookieCols = useCookie<number>('inkgist_grid_cols', { default: () => 1, maxAge: 31536000 })
+    if (cookieCols.value && (cookieCols.value === 1 || cookieCols.value === 2 || cookieCols.value === 3)) {
+      columns.value = cookieCols.value as GridColumns
+    }
+  } catch {}
+
   const getUserStorageKey = (baseKey: string) => {
     const uid = currentUser.value?.id || 'guest'
     return `${baseKey}_${uid}`
+  }
+
+  const restoreColumnsFromStorage = () => {
+    try {
+      const cookieCols = useCookie<number>('inkgist_grid_cols', { default: () => 1, maxAge: 31536000 })
+      if (cookieCols.value && (cookieCols.value === 1 || cookieCols.value === 2 || cookieCols.value === 3)) {
+        columns.value = cookieCols.value as GridColumns
+      }
+    } catch {}
+    if (typeof window === 'undefined') return
+    try {
+      const cKey = getUserStorageKey(STORAGE_KEY_COLUMNS)
+      const savedCol = localStorage.getItem(cKey) || localStorage.getItem(STORAGE_KEY_COLUMNS)
+      if (savedCol) {
+        const num = Number(savedCol)
+        if (num === 1 || num === 2 || num === 3) columns.value = num as GridColumns
+      }
+    } catch {}
   }
 
   const saveToStorage = () => {
@@ -356,6 +394,7 @@ export const useBookmarks = () => {
   }
 
   const loadFromBackend = async () => {
+    restoreColumnsFromStorage()
     try {
       const headers = getAuthHeaders()
       const [bmRes, fdRes] = await Promise.all([
@@ -368,11 +407,19 @@ export const useBookmarks = () => {
       }
       if (fdRes && fdRes.folders) {
         folders.value = fdRes.folders
-        saveFoldersToStorage()
       }
+      // 自动从所有书签中提取并补全分类文件夹
+      for (const b of bookmarks.value) {
+        if (b.folder && !folders.value.some(f => f.name === b.folder)) {
+          folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: b.folder })
+        }
+      }
+      folders.value = [...folders.value]
+      saveFoldersToStorage()
     } catch {
       loadFromStorage()
     } finally {
+      restoreColumnsFromStorage()
       isLoaded.value = true
     }
   }
@@ -390,8 +437,16 @@ export const useBookmarks = () => {
       if (savedFolders) folders.value = JSON.parse(savedFolders)
       else folders.value = []
 
-      const savedCol = localStorage.getItem(STORAGE_KEY_COLUMNS)
-      if (savedCol) columns.value = Number(savedCol) as GridColumns
+      // 自动从所有书签中提取并补全分类文件夹
+      for (const b of bookmarks.value) {
+        if (b.folder && !folders.value.some(f => f.name === b.folder)) {
+          folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: b.folder })
+        }
+      }
+      folders.value = [...folders.value]
+      saveFoldersToStorage()
+
+      restoreColumnsFromStorage()
     } catch (e) {
       console.error('Failed to load bookmarks or folders', e)
     } finally {
@@ -400,12 +455,14 @@ export const useBookmarks = () => {
   }
 
   const initData = async () => {
+    restoreColumnsFromStorage()
     await fetchCurrentUser()
     if (isLoggedIn.value) {
       await loadFromBackend()
     } else {
       loadFromStorage()
     }
+    restoreColumnsFromStorage()
   }
 
   if (typeof window !== 'undefined') {
@@ -422,7 +479,8 @@ export const useBookmarks = () => {
     window.addEventListener('storage', (e) => {
       const currentBmKey = getUserStorageKey(STORAGE_KEY_BOOKMARKS)
       const currentFdKey = getUserStorageKey(STORAGE_KEY_FOLDERS)
-      if (e.key === currentBmKey || e.key === currentFdKey || e.key === STORAGE_KEY_COLUMNS) {
+      const currentColKey = getUserStorageKey(STORAGE_KEY_COLUMNS)
+      if (e.key === currentBmKey || e.key === currentFdKey || e.key === currentColKey || e.key === STORAGE_KEY_COLUMNS) {
         if (!isLoggedIn.value) {
           loadFromStorage()
         } else {
@@ -440,6 +498,7 @@ export const useBookmarks = () => {
     if (!trimmed || folders.value.some(f => f.name === trimmed)) return
     const newF: BookmarkFolder = { id: 'f_' + Date.now(), name: trimmed }
     folders.value.push(newF)
+    folders.value = [...folders.value]
     saveFoldersToStorage()
     if (isLoggedIn.value) {
       try {
@@ -466,6 +525,8 @@ export const useBookmarks = () => {
       if (b.folder === oldName) b.folder = trimmed
     })
 
+    bookmarks.value = [...bookmarks.value]
+    folders.value = [...folders.value]
     saveToStorage()
     saveFoldersToStorage()
 
@@ -484,6 +545,8 @@ export const useBookmarks = () => {
     folders.value = folders.value.filter(f => f.name !== folderName)
     if (activeFolder.value === folderName) activeFolder.value = 'all'
     bookmarks.value.forEach(b => { if (b.folder === folderName) b.folder = undefined })
+    bookmarks.value = [...bookmarks.value]
+    folders.value = [...folders.value]
     saveToStorage()
     saveFoldersToStorage()
     if (isLoggedIn.value) {
@@ -504,6 +567,7 @@ export const useBookmarks = () => {
     const target = bookmarks.value.find(b => b.id === bookmarkId)
     if (target) {
       target.folder = folderName === 'none' || folderName === 'all' ? undefined : folderName
+      bookmarks.value = [...bookmarks.value]
       saveToStorage()
       if (isLoggedIn.value) {
         try {
@@ -521,6 +585,7 @@ export const useBookmarks = () => {
     const target = bookmarks.value.find(b => b.id === bookmarkId)
     if (target) {
       target.folder = undefined
+      bookmarks.value = [...bookmarks.value]
       saveToStorage()
       if (isLoggedIn.value) {
         try {
@@ -564,7 +629,112 @@ export const useBookmarks = () => {
 
   const setColumns = (cols: GridColumns) => {
     columns.value = cols
-    if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY_COLUMNS, String(cols))
+    try {
+      const cookieCols = useCookie<number>('inkgist_grid_cols', { default: () => 1, maxAge: 31536000 })
+      cookieCols.value = cols
+    } catch {}
+    if (typeof window !== 'undefined') {
+      const cKey = getUserStorageKey(STORAGE_KEY_COLUMNS)
+      localStorage.setItem(cKey, String(cols))
+      localStorage.setItem(STORAGE_KEY_COLUMNS, String(cols))
+    }
+  }
+
+  const importBookmarksBatch = async (items: Array<{ url: string; title: string; folder?: string; tags?: string[]; icon?: string; summary?: string }>) => {
+    if (!items || items.length === 0) return { count: 0 }
+
+    const now = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    const newFoldersSet = new Set<string>()
+    const processedBookmarks: Bookmark[] = []
+
+    for (const item of items) {
+      const cleanUrl = (item.url || '').trim()
+      if (!cleanUrl) continue
+
+      let folderName = item.folder ? item.folder.trim() : undefined
+      if (folderName) {
+        folderName = folderName.replace(/^(书签栏|收藏夹栏|Bookmarks\s*bar|Bookmarks\s*menu|Bookmarks\s*toolbar|Favorites\s*bar|Other\s*bookmarks|其他书签|移动设备书签)\/?/i, '').trim()
+        if (!folderName) folderName = undefined
+      }
+
+      if (folderName) {
+        newFoldersSet.add(folderName)
+        if (folderName.includes('/')) {
+          const topLevel = folderName.split('/')[0].trim()
+          if (topLevel) newFoldersSet.add(topLevel)
+        }
+      }
+
+      processedBookmarks.push({
+        id: 'bm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        title: item.title || cleanUrl,
+        url: cleanUrl,
+        folder: folderName,
+        tags: item.tags || [],
+        icon: item.icon || 'bookmark',
+        summary: item.summary || '',
+        createdAt: now
+      })
+    }
+
+    // 1. 本地更新分类并确保响应式触发
+    for (const fName of newFoldersSet) {
+      if (!folders.value.some(f => f.name === fName)) {
+        folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: fName })
+      }
+    }
+
+    // 2. 本地更新书签列表
+    for (const bm of processedBookmarks) {
+      const targetNorm = normalizeUrl(bm.url)
+      const existingIdx = bookmarks.value.findIndex(b => normalizeUrl(b.url) === targetNorm)
+      if (existingIdx !== -1) {
+        bookmarks.value[existingIdx] = {
+          ...bookmarks.value[existingIdx],
+          ...bm,
+          folder: bm.folder || bookmarks.value[existingIdx].folder,
+          id: bookmarks.value[existingIdx].id
+        }
+      } else {
+        bookmarks.value.unshift(bm)
+      }
+    }
+
+    // 3. 再次确保所有书签中的文件夹都被注册到 folders 列表中
+    for (const b of bookmarks.value) {
+      if (b.folder && !folders.value.some(f => f.name === b.folder)) {
+        folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: b.folder })
+      }
+    }
+
+    folders.value = [...folders.value]
+    bookmarks.value = [...bookmarks.value]
+    saveFoldersToStorage()
+    saveToStorage()
+
+    // 4. 服务端批量写入同步
+    if (isLoggedIn.value) {
+      try {
+        const headers = getAuthHeaders()
+        const allFolderNames = folders.value.map(f => f.name)
+        if (allFolderNames.length > 0) {
+          await $fetch('/api/user/folders/batch', {
+            method: 'POST',
+            headers,
+            body: allFolderNames
+          })
+        }
+        await $fetch('/api/user/bookmarks/batch', {
+          method: 'POST',
+          headers,
+          body: processedBookmarks
+        })
+      } catch (err) {
+        console.error('Failed to batch sync bookmarks/folders to server', err)
+      }
+    }
+
+    return { count: processedBookmarks.length }
   }
 
   const addBookmark = async (bookmark: Omit<Bookmark, 'id'>) => {
@@ -577,6 +747,7 @@ export const useBookmarks = () => {
       savedBm = {
         ...bookmarks.value[existingIndex],
         ...bookmark,
+        folder: bookmark.folder || bookmarks.value[existingIndex].folder,
         id: bookmarks.value[existingIndex].id
       }
       bookmarks.value[existingIndex] = savedBm
@@ -589,6 +760,26 @@ export const useBookmarks = () => {
       bookmarks.value.unshift(savedBm)
     }
 
+    // 自动确保文件夹存在并响应式注册
+    if (savedBm.folder) {
+      const fName = savedBm.folder.trim()
+      if (fName && !folders.value.some(f => f.name === fName)) {
+        folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: fName })
+        folders.value = [...folders.value]
+        saveFoldersToStorage()
+        if (isLoggedIn.value) {
+          try {
+            $fetch('/api/user/folders', {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: { name: fName }
+            }).catch(() => {})
+          } catch {}
+        }
+      }
+    }
+
+    bookmarks.value = [...bookmarks.value]
     saveToStorage()
     if (isLoggedIn.value) {
       try {
@@ -703,6 +894,7 @@ export const useBookmarks = () => {
     getBookmarksInFolder,
     setColumns,
     addBookmark,
+    importBookmarksBatch,
     updateBookmark,
     deleteBookmark,
     togglePin,
@@ -852,6 +1044,10 @@ export const ICONS: Record<string, string> = {
   'file-text': '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line>',
   folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>',
   external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+  checkSquare: '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="m9 12 2 2 4-4"></path>',
+  arrowRight: '<path d="m9 18 6-6-6-6"></path>',
   alert: '<circle cx="12" cy="12" r="10"></line><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>',
   github: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>'
 }

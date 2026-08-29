@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { ICONS, type BookmarkFolder } from '../pages/state'
 
 const props = defineProps<{
@@ -97,6 +97,26 @@ const emit = defineEmits<{
 
 const isCreating = ref(false)
 const newFolderName = ref('')
+
+watch(
+  () => props.isOpen,
+  (open) => {
+    if (typeof document !== 'undefined') {
+      if (open) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    }
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.body.style.overflow = ''
+  }
+})
 
 const selectFolder = (folderName: string) => {
   emit('assign', { bookmarkId: props.bookmarkId, folderName })
@@ -123,6 +143,7 @@ const handleCreateAndAssign = () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  overscroll-behavior: contain;
 }
 
 .mobile-folder-sheet {

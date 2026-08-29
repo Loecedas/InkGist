@@ -112,6 +112,16 @@ const copied = ref(false)
 const clickTipVisible = ref(false)
 const siteOrigin = ref('')
 
+watch(() => props.modelValue, (val) => {
+  if (typeof document !== 'undefined') {
+    if (val) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+  }
+}, { immediate: true })
+
 onMounted(() => {
   if (typeof window !== 'undefined') {
     siteOrigin.value = window.location.origin
@@ -120,6 +130,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.body.style.overflow = ''
+  }
   if (typeof window !== 'undefined') {
     window.removeEventListener('keydown', handleKeyDown)
   }
@@ -190,6 +203,7 @@ const copyBookmarkletCode = async () => {
   z-index: 9999;
   padding: 1rem;
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overscroll-behavior: contain;
 }
 
 .bookmarklet-modal-card {
@@ -204,6 +218,7 @@ const copyBookmarkletCode = async () => {
   display: flex;
   flex-direction: column;
   animation: scaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  overscroll-behavior: contain;
 }
 
 .modal-header {

@@ -146,5 +146,68 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // 3. 批量书签操作 /api/user/bookmarks/batch
+  if (action === 'bookmarks/batch') {
+    if (method === 'POST') {
+      const body = await readBody(event)
+      const items = Array.isArray(body) ? body : (body?.bookmarks || [])
+      if (!Array.isArray(items) || items.length === 0) {
+        return { success: true, count: 0, message: '没有需要保存的书签' }
+      }
+
+      const rows = items.map((b: any) => ({
+        id: b.id || 'bm_' + randomUUID(),
+        user_id: user.id,
+        title: b.title || b.url,
+        url: b.url,
+        icon: b.icon || 'bookmark',
+        description: b.description || '',
+        summary: b.summary || '',
+        tags: b.tags || [],
+        folder: b.folder || undefined,
+        color: b.color || '#0f172a',
+        is_pinned: Boolean(b.isPinned || b.is_pinned),
+        is_favorite: Boolean(b.isFavorite || b.is_favorite),
+        created_at: b.createdAt || b.created_at || new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+      }))
+
+      const count = await dbBookmarks.batchUpsert(rows, user.id, event)
+      return {
+        success: true,
+        count,
+        message: `成功批量导入 ${count} 条书签`
+      }
+    }
+  }
+
+  // 4. 批量分类文件夹操作 /api/user/folders/batch
+  if (action === 'folders/batch') {
+    if (method === 'POST') {
+      const body = await readBody(event)
+      const names = Array.isArray(body) ? body : (body?.folders || [])
+      if (!Array.isArray(names) || names.length === 0) {
+        return { success: true, count: 0, message: '没有需要创建的分类' }
+      }
+
+      const now = new Date().toISOString()
+      const folderRows = names
+        .map((n: any) => typeof n === 'string' ? n.trim() : (n?.name ? String(n.name).trim() : ''))
+        .filter((n: string) => n.length > 0 && n.length <= 50)
+        .map((name: string) => ({
+          id: 'f_' + randomUUID(),
+          user_id: user.id,
+          name,
+          created_at: now
+        }))
+
+      const count = await dbFolders.batchInsert(folderRows, user.id, event)
+      return {
+        success: true,
+        count,
+        message: `成功批量创建分类`
+      }
+    }
+  }
+
   throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 })

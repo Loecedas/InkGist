@@ -55,6 +55,13 @@ const inputRef = ref<HTMLInputElement | null>(null)
 watch(
   () => props.isOpen,
   (open) => {
+    if (typeof document !== 'undefined') {
+      if (open) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    }
     if (open) {
       newName.value = props.folderName
       nextTick(() => {
@@ -62,7 +69,8 @@ watch(
         inputRef.value?.select()
       })
     }
-  }
+  },
+  { immediate: true }
 )
 
 const handleConfirm = () => {
@@ -82,6 +90,7 @@ const handleConfirm = () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overscroll-behavior: contain;
 }
 
 .rename-folder-dialog {

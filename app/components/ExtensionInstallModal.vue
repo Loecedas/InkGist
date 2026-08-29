@@ -79,6 +79,7 @@
                   @click.stop="toggleSelectBookmark(bm.url)"
                 />
                 <span class="bm-idx">#{{ idx + 1 }}</span>
+                <span v-if="bm.folder" class="bm-folder-badge" :title="`所属分类：${bm.folder}`">📁 {{ bm.folder }}</span>
                 <span class="bm-title" :title="bm.title">{{ bm.title }}</span>
                 <span class="bm-url" :title="bm.url">{{ bm.url }}</span>
               </div>
@@ -205,6 +206,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ICONS } from '../pages/state'
+import { parseBookmarkHtml } from '../utils/bookmark-io'
+
+export interface ImportedBookmarkItem {
+  url: string
+  title: string
+  folder?: string
+  tags?: string[]
+  icon?: string
+  summary?: string
+}
 
 const props = defineProps<{
   modelValue: boolean
@@ -212,13 +223,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
-  (e: 'import-bookmarks', items: Array<{ url: string; title: string }>): void
+  (e: 'import-bookmarks', items: ImportedBookmarkItem[]): void
 }>()
 
 const isExtensionInstalled = ref(false)
 const importSource = ref<'extension' | 'html' | null>(null)
 const isLoadingBookmarks = ref(false)
-const detectedBookmarks = ref<Array<{ url: string; title: string }>>([])
+const detectedBookmarks = ref<ImportedBookmarkItem[]>([])
 const selectedBookmarkUrls = ref<Set<string>>(new Set())
 const searchFilter = ref('')
 const hasDownloaded = ref(false)
@@ -390,6 +401,14 @@ const manualReconnect = () => {
 }
 
 watch(() => props.modelValue, (val) => {
+  if (typeof document !== 'undefined') {
+    if (val) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+  }
+
   if (val) {
     searchFilter.value = ''
     connectionNotice.value = ''
@@ -397,7 +416,7 @@ watch(() => props.modelValue, (val) => {
   } else {
     stopPolling()
   }
-})
+}, { immediate: true })
 
 onMounted(() => {
   if (typeof window !== 'undefined') {
@@ -406,6 +425,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.body.style.overflow = ''
+  }
   stopPolling()
   if (typeof window !== 'undefined') {
     window.removeEventListener('message', handleWindowMessage)
@@ -450,28 +472,9 @@ const handleHtmlFileUpload = (e: Event) => {
 
 const parseHtmlBookmarks = (html: string) => {
   try {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
-    const links = doc.querySelectorAll('a[href]')
-    const validItems: Array<{ url: string; title: string }> = []
-    const seen = new Set<string>()
+    const validItems = parseBookmarkHtml(html)
 
-    links.forEach((a) => {
-      const href = a.getAttribute('href')?.trim()
-      if (!href || href.startsWith('javascript:') || href.startsWith('place:') || href.startsWith('data:')) {
-        return
-      }
-      if (!/^https?:\/\//i.test(href)) {
-        return
-      }
-      if (!seen.has(href)) {
-        seen.add(href)
-        const text = a.textContent?.trim() || href
-        validItems.push({ url: href, title: text })
-      }
-    })
-
-    if (validItems.length === 0) {
+    if (!validItems || validItems.length === 0) {
       alert('未从文件中识别到有效网页链接')
       return
     }
@@ -487,6 +490,19 @@ const parseHtmlBookmarks = (html: string) => {
 </script>
 
 <style scoped>
+.bm-folder-badge {
+  font-size: 0.6875rem;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.05rem 0.35rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -498,22 +514,24 @@ const parseHtmlBookmarks = (html: string) => {
   justify-content: center;
   padding: 1rem;
   animation: fadeIn 0.18s ease;
+  overscroll-behavior: contain;
 }
 
-/* 固定弹窗尺寸，无论内容多少均保持稳定，杜绝跳动 */
+/* 固定弹窗尺寸自适应，杜绝溢出截断与跳动 */
 .ext-modal-card {
   width: 100%;
-  max-width: 680px;
-  height: 590px;
+  max-width: 640px;
+  height: auto;
   max-height: 90vh;
   background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-modal);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
   overflow: hidden;
+  position: relative;
+  overscroll-behavior: contain;
 }
 
 .modal-header {
@@ -740,7 +758,7 @@ const parseHtmlBookmarks = (html: string) => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  overflow: hidden;
+  min-height: 0;
 }
 
 .success-banner-box {
@@ -772,7 +790,7 @@ const parseHtmlBookmarks = (html: string) => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  overflow: hidden;
+  min-height: 0;
 }
 
 .preview-header-bar {
@@ -780,6 +798,7 @@ const parseHtmlBookmarks = (html: string) => {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  padding: 4px 2px;
   flex-shrink: 0;
 }
 
@@ -802,13 +821,21 @@ const parseHtmlBookmarks = (html: string) => {
 
 .search-field {
   width: 100%;
-  padding: 0.35rem 1.75rem 0.35rem 0.65rem;
+  height: 34px;
+  padding: 0 1.75rem 0 0.75rem;
   font-size: 0.8125rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-surface-subtle);
   color: var(--text-main);
   box-sizing: border-box;
+  outline: none;
+  transition: all 0.15s ease;
+}
+.search-field:focus {
+  border-color: var(--primary);
+  background-color: var(--bg-surface);
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
 }
 
 .clear-search-btn {
@@ -833,11 +860,10 @@ const parseHtmlBookmarks = (html: string) => {
 
 .bookmarks-list-box {
   flex: 1;
-  min-height: 270px;
-  max-height: 270px;
-  height: 270px;
+  min-height: 180px;
+  max-height: 230px;
   overflow-y: auto;
-  overflow-x: hidden; /* 其他尺寸下禁止横向滑动 */
+  overflow-x: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-surface-subtle);
