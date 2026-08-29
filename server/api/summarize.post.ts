@@ -210,7 +210,7 @@ ${scrapedContent ? scrapedContent.slice(0, 5000) : `${scrapedTitle} - ${cleanUrl
       url: cleanUrl,
       detailedSummary,
       tags,
-      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       fetchEngine
     }
   } catch (err: any) {

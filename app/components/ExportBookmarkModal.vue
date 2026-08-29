@@ -271,7 +271,15 @@ watch(() => props.modelValue, (val) => {
       customSelectedBookmarkIds.value = new Set(props.allBookmarks.map(b => b.id))
     }
 
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const formatLocalDate = (dInput?: Date | string) => {
+      const d = dInput ? (typeof dInput === 'string' ? new Date(dInput) : dInput) : new Date()
+      if (isNaN(d.getTime())) return typeof dInput === 'string' ? dInput : ''
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    const dateStr = formatLocalDate().replace(/-/g, '')
     customFilename.value = `InkGist_Bookmarks_${dateStr}`
   }
 }, { immediate: true })
@@ -344,7 +352,15 @@ const downloadMarkdownFile = (content: string, filename: string) => {
 }
 
 const generateMarkdownArchive = (bms: Bookmark[]): string => {
-  const dateStr = new Date().toISOString().split('T')[0]
+  const formatLocalDate = (dInput?: Date | string) => {
+    const d = dInput ? (typeof dInput === 'string' ? new Date(dInput) : dInput) : new Date()
+    if (isNaN(d.getTime())) return typeof dInput === 'string' ? dInput : ''
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  const dateStr = formatLocalDate()
   let md = `---
 title: "墨萃书签知识库归档"
 created: "${dateStr}"
@@ -372,7 +388,7 @@ generator: "墨萃 · InkGist"
   for (const [folderName, items] of folderMap.entries()) {
     md += `\n## 📁 ${folderName} (${items.length})\n\n`
     for (const bm of items) {
-      const bmDate = bm.createdAt ? new Date(bm.createdAt).toISOString().split('T')[0] : dateStr
+      const bmDate = bm.createdAt ? formatLocalDate(bm.createdAt) : dateStr
       md += `### 🔗 [${bm.title || bm.url}](${bm.url})\n\n`
       md += `- **网址**：[${bm.url}](${bm.url})\n`
       md += `- **所属分类**：\`${folderName}\`\n`

@@ -42,7 +42,7 @@ export default defineEventHandler(async (event) => {
       const existing = await dbBookmarks.findByUserAndUrl(user.id, url, event)
       const isUpdate = Boolean(existing)
       const bookmarkId = existing ? existing.id : (id || 'bm_' + randomUUID())
-      const createdAt = existing ? existing.created_at : new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+      const createdAt = existing ? existing.created_at : (body?.createdAt || new Date().toISOString())
 
       await dbBookmarks.upsert({
         id: bookmarkId,
@@ -168,7 +168,7 @@ export default defineEventHandler(async (event) => {
         color: b.color || '#0f172a',
         is_pinned: Boolean(b.isPinned || b.is_pinned),
         is_favorite: Boolean(b.isFavorite || b.is_favorite),
-        created_at: b.createdAt || b.created_at || new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+        created_at: b.createdAt || b.created_at || new Date().toISOString()
       }))
 
       const count = await dbBookmarks.batchUpsert(rows, user.id, event)

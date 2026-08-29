@@ -215,7 +215,7 @@
                         <span class="status-pulse-dot"></span>
                         <span>{{ row.isTyping ? 'AI 正在实时输出中...' : (row.isEditing ? '正在编辑总结' : '总结已生成') }}</span>
                       </span>
-                      <span class="result-time">{{ row.result?.timestamp || currentTimeStr }}</span>
+                      <span class="result-time">{{ formatDisplayTime(row.result?.timestamp) }}</span>
                     </div>
 
                     <div class="result-actions-wrapper">
@@ -418,7 +418,18 @@ const inputRows = ref<InputRowItem[]>([
 
 const showBookmarkletModal = ref(false)
 const showExtensionModal = ref(false)
-const currentTimeStr = ref(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
+const currentTimeStr = ref(new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }))
+const formatDisplayTime = (ts?: string | number | Date) => {
+  if (!ts) {
+    return new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  if (typeof ts === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(ts.trim())) {
+    return ts.trim()
+  }
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return String(ts)
+  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+}
 const inputPlaceholder = ref('输入或粘贴网页链接 (例如: juejin.cn 或 github.com)...')
 
 // ==========================================
@@ -901,7 +912,7 @@ const executeRowSummary = async (row: InputRowItem, initialTitle?: string) => {
         url: data.url || raw,
         detailedSummary: fullText,
         tags: data.tags || [],
-        timestamp: data.timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        timestamp: data.timestamp || new Date().toISOString()
       }
     } else {
       setRowError(row, '总结生成失败，请检查网络或链接')

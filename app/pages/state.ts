@@ -619,8 +619,16 @@ export const useBookmarks = () => {
     result.sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1
       if (!a.isPinned && b.isPinned) return 1
-      if (currentSort.value === 'time-desc') return (b.createdAt || '').localeCompare(a.createdAt || '')
-      if (currentSort.value === 'time-asc') return (a.createdAt || '').localeCompare(b.createdAt || '')
+      if (currentSort.value === 'time-desc') {
+        const tA = a.createdAt ? Date.parse(a.createdAt.includes('/') ? a.createdAt.replace(/\//g, '-') : a.createdAt) || 0 : 0
+        const tB = b.createdAt ? Date.parse(b.createdAt.includes('/') ? b.createdAt.replace(/\//g, '-') : b.createdAt) || 0 : 0
+        return tB - tA
+      }
+      if (currentSort.value === 'time-asc') {
+        const tA = a.createdAt ? Date.parse(a.createdAt.includes('/') ? a.createdAt.replace(/\//g, '-') : a.createdAt) || 0 : 0
+        const tB = b.createdAt ? Date.parse(b.createdAt.includes('/') ? b.createdAt.replace(/\//g, '-') : b.createdAt) || 0 : 0
+        return tA - tB
+      }
       if (currentSort.value === 'name-asc') return a.title.localeCompare(b.title, 'zh-CN')
       return 0
     })
@@ -643,7 +651,7 @@ export const useBookmarks = () => {
   const importBookmarksBatch = async (items: Array<{ url: string; title: string; folder?: string; tags?: string[]; icon?: string; summary?: string }>) => {
     if (!items || items.length === 0) return { count: 0 }
 
-    const now = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    const now = new Date().toISOString()
     const newFoldersSet = new Set<string>()
     const processedBookmarks: Bookmark[] = []
 
@@ -755,7 +763,7 @@ export const useBookmarks = () => {
       savedBm = {
         ...bookmark,
         id: 'bm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-        createdAt: new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+        createdAt: new Date().toISOString()
       }
       bookmarks.value.unshift(savedBm)
     }
@@ -985,7 +993,7 @@ export const useAiSummary = () => {
           title: data.title,
           url: data.url,
           detailedSummary: fullText,
-          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+          timestamp: data.timestamp || new Date().toISOString()
         }
       }
     } catch (err: any) {
