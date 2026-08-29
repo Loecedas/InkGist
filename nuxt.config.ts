@@ -6,7 +6,7 @@ export default defineNuxtConfig({
     compatibilityVersion: 3
   },
   nitro: {
-    preset: process.env.NITRO_PRESET || 'node-server'
+    preset: process.env.NITRO_PRESET || 'cloudflare_module'
   },
   srcDir: 'app',
   runtimeConfig: {
