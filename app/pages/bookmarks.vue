@@ -7,11 +7,11 @@
         <div class="header-main-row">
           <div class="header-left-group">
             <div class="top-left-icon-box" title="墨萃 · 书签库">
-              <svg class="svg-icon bookmark-header-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
+              <SvgIcon name="bookmark" size="20" extra-class="bookmark-header-icon" />
             </div>
 
             <div class="compact-search-box">
-              <svg class="svg-icon search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.search"></svg>
+              <SvgIcon name="search" size="15" extra-class="search-icon" />
               <input
                 id="bookmark-search-input"
                 name="searchQuery"
@@ -25,26 +25,26 @@
                 title="清空搜索"
                 @click="searchQuery = ''"
               >
-                <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
+                <SvgIcon name="close" size="12" />
               </button>
             </div>
 
             <!-- 桌面端列数切换 -->
-            <ClientOnly>
-              <div class="column-switcher" title="切换每行排布数量">
-                <span class="switcher-text">每行排布:</span>
+            <div class="column-switcher" title="切换每行排布数量">
+              <span class="switcher-text">每行排布:</span>
+              <div class="column-btn-group">
                 <button
                   v-for="col in ([1, 2, 3] as const)"
                   :key="col"
-                  :class="['col-btn', `col-btn-${col}`, { active: columns === col }]"
+                  :class="['col-btn', `col-btn-${col}`, { active: effectiveColumns === col }]"
                   :title="`一行显示 ${col} 个书签`"
                   @click="setColumns(col)"
                 >
-                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[`grid-${col}`]"></svg>
+                  <SvgIcon :name="`grid-${col}`" size="13" />
                   <span>{{ col === 1 ? '1列(详细)' : `${col}列` }}</span>
                 </button>
               </div>
-            </ClientOnly>
+            </div>
           </div>
 
           <!-- 右上角操作区：批量管理 + 导出 + 退出登录 + 主题切换 + 返回首页 -->
@@ -55,7 +55,7 @@
               title="批量选择与管理书签"
               @click="toggleSelectMode"
             >
-              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.checkSquare"></svg>
+              <SvgIcon name="checkSquare" size="13" />
               <span>{{ isSelectMode ? '完成选择' : '批量管理' }}</span>
             </button>
 
@@ -65,22 +65,22 @@
               title="导出为标准 Netscape HTML 或 Markdown 知识库"
               @click="isExportModalOpen = true"
             >
-              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.download"></svg>
+              <SvgIcon name="download" size="13" />
               <span>导出</span>
             </button>
 
             <button class="nav-logout-btn" title="退出登录" @click="handleLogout">
-              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.logout"></svg>
+              <SvgIcon name="logout" size="14" />
               <span>退出登录</span>
             </button>
 
             <button class="theme-toggle-btn" :title="`当前主题：${currentLabel} (点击切换)`" @click="cycleTheme">
-              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="currentIconSvg"></svg>
+              <SvgIcon :svg="currentIconSvg" size="14" />
               <span class="theme-label">{{ currentLabel }}</span>
             </button>
 
             <NuxtLink to="/" class="nav-switch-btn" title="进入首页">
-              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.home"></svg>
+              <SvgIcon name="home" size="14" />
               <span>首页</span>
             </NuxtLink>
           </div>
@@ -88,105 +88,72 @@
 
         <!-- 顶部第二行：分类文件夹导航栏 -->
         <div class="folders-nav-row">
-          <!-- 全部书签 Tab -->
+          <!-- 全部书签 Tab (支持作为移出到根目录的 Drop Target) -->
           <button
-            class="folder-tab-btn"
-            :class="{ active: activeFolder === 'all', 'is-drag-target': dragOverFolder === 'all' }"
-            title="点击查看所有书签，也可将卡片拖入此移出文件夹"
+            class="folder-tab-btn root-all-tab"
+            :class="{
+              active: activeFolder === 'all',
+              'is-drag-over-root': dragOverTarget === 'all' && draggedFolderName,
+              'is-drag-target': dragOverTarget === 'all' && draggedBookmarkId
+            }"
+            title="点击查看所有书签。拖拽子文件夹至此可移出至根目录，也可将卡片拖入此移出所有分类"
             @click="activeFolder = 'all'"
-            @dragover.prevent="handleDragOverFolder('all')"
-            @dragleave="handleDragLeaveFolder('all')"
-            @drop="handleDropFolder('all')"
+            @dragover.prevent="handleFolderDragOver($event, 'all')"
+            @dragleave="handleFolderDragLeave($event, 'all')"
+            @drop="handleFolderDrop($event, 'all')"
           >
-            <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+            <SvgIcon name="folder" size="13" />
             <span class="folder-name">全部</span>
             <span class="folder-count">({{ bookmarks.length }})</span>
+            <span v-if="dragOverTarget === 'all' && draggedFolderName" class="drag-hint-badge">移出到根目录</span>
           </button>
 
-          <!-- 用户自定义分类文件夹 Tabs -->
-          <div
-            v-for="folder in folders"
-            :key="folder.id"
-            class="folder-tab-wrapper"
-            @mouseenter="openFolderHover(folder.name)"
-            @mouseleave="scheduleCloseFolderHover"
+          <!-- 未分类书签 Tab -->
+          <button
+            class="folder-tab-btn root-uncategorized-tab"
+            :class="{
+              active: activeFolder === 'uncategorized',
+              'is-drag-target': dragOverTarget === 'uncategorized' && draggedBookmarkId
+            }"
+            title="点击查看未分类书签。可将卡片拖入此移出所有分类"
+            @click="activeFolder = 'uncategorized'"
+            @dragover.prevent="handleFolderDragOver($event, 'uncategorized')"
+            @dragleave="handleFolderDragLeave($event, 'uncategorized')"
+            @drop="handleFolderDrop($event, 'uncategorized')"
           >
-            <button
-              class="folder-tab-btn"
-              :class="{ active: activeFolder === folder.name, 'is-drag-target': dragOverFolder === folder.name }"
-              :title="`点击仅显示 [${folder.name}] 中的书签，长按卡片可拖拽入此`"
-              @click="activeFolder = folder.name"
-              @dragover.prevent="handleDragOverFolder(folder.name)"
-              @dragleave="handleDragLeaveFolder(folder.name)"
-              @drop="handleDropFolder(folder.name)"
-            >
-              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
-              <span class="folder-name">{{ folder.name }}</span>
-              <span class="folder-count">({{ getFolderBookmarks(folder.name).length }})</span>
-            </button>
+            <SvgIcon name="folder" size="13" />
+            <span class="folder-name">未分类</span>
+            <span class="folder-count">({{ uncategorizedBookmarks.length }})</span>
+            <span v-if="dragOverTarget === 'uncategorized' && draggedBookmarkId" class="drag-hint-badge">移至未分类</span>
+          </button>
 
-            <!-- 鼠标悬停预览浮窗 (支持鼠标无缝滑入并交互) -->
-            <div
-              v-if="hoveredFolder === folder.name"
-              class="folder-hover-dropdown-bridge"
-              @mouseenter="cancelCloseFolderHover"
-              @mouseleave="scheduleCloseFolderHover"
-            >
-              <div class="folder-hover-dropdown">
-                <div class="dropdown-header">
-                  <div class="dropdown-title-group">
-                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
-                    <span class="dropdown-folder-title">{{ folder.name }}</span>
-                    <span class="dropdown-count-badge">{{ getFolderBookmarks(folder.name).length }} 项</span>
-                  </div>
-
-                  <div class="dropdown-actions-group">
-                    <button
-                      class="btn-dropdown-action"
-                      title="重命名此文件夹"
-                      @click.stop.prevent="startRenameFolder(folder.name)"
-                    >
-                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.edit"></svg>
-                      <span>重命名</span>
-                    </button>
-
-                    <button
-                      class="btn-dropdown-action btn-danger-action"
-                      title="删除此文件夹"
-                      @click.stop.prevent="handleDeleteFolder(folder.name)"
-                    >
-                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.trash"></svg>
-                      <span>删除</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="dropdown-list">
-                  <div v-if="getFolderBookmarks(folder.name).length === 0" class="dropdown-empty-hint">
-                    暂无书签，可从下方长按拖拽卡片至此
-                  </div>
-
-                  <div
-                    v-for="bm in getFolderBookmarks(folder.name)"
-                    :key="bm.id"
-                    class="dropdown-bm-row"
-                  >
-                    <a :href="bm.url" target="_blank" rel="noopener noreferrer" class="dropdown-bm-item" :title="`点击访问：${bm.title}`">
-                      <span class="dropdown-bm-bullet">•</span>
-                      <span class="dropdown-bm-name">{{ bm.title }}</span>
-                    </a>
-
-                    <button
-                      class="btn-remove-from-folder"
-                      title="将此书签从该文件夹移出"
-                      @click.stop.prevent="handleRemoveBmFromFolder(bm.id, folder.name)"
-                    >
-                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <!-- 一级分类文件夹 Tabs 列表容器 (使用独立组件隔离各自的 Virtual DOM Block) -->
+          <div class="folders-tab-items-wrapper">
+            <FolderTabItem
+              v-for="folder in topLevelFolders"
+              :key="folder.name"
+              :folder="folder"
+              :is-active="isFolderOrDescendantActive(folder.name)"
+              :is-select-mode="isSelectMode"
+              :drag-over-target="dragOverTarget"
+              :drag-over-position="dragOverPosition"
+              :dragged-folder-name="draggedFolderName"
+              :dragged-bookmark-id="draggedBookmarkId"
+              :cascade-path="cascadePath"
+              @select-folder="activeFolder = $event; cascadePath = []"
+              @open-cascade="(d, f) => openCascadeLevel(d, f)"
+              @cancel-close="cancelCloseCascade"
+              @schedule-close="scheduleCloseCascade"
+              @move-out="handleMoveOutToRoot"
+              @remove-bm="handleRemoveBmFromFolder"
+              @drag-start-bm="handleBmDragStart"
+              @drag-end-bm="handleBmDragEnd"
+              @drag-start="handleFolderDragStart"
+              @drag-end="handleFolderDragEnd"
+              @drag-over="handleFolderDragOver"
+              @drag-leave="handleFolderDragLeave"
+              @drop="handleFolderDrop"
+            />
           </div>
 
           <!-- 新建文件夹按钮与输入表单 -->
@@ -197,7 +164,7 @@
               title="新建分类文件夹"
               @click="isCreatingFolder = true"
             >
-              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.plus"></svg>
+              <SvgIcon name="plus" size="13" />
               <span>新建文件夹</span>
             </button>
 
@@ -205,17 +172,17 @@
               <input
                 v-model="newFolderName"
                 type="text"
-                placeholder="分类名称..."
+                placeholder="分类名称(支持 父/子)..."
                 class="new-folder-input"
                 autoFocus
                 @keydown.enter="submitNewFolder"
                 @keydown.esc="isCreatingFolder = false"
               />
               <button class="btn-confirm-add" title="确认添加" @click="submitNewFolder">
-                <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.check"></svg>
+                <SvgIcon name="check" size="13" />
               </button>
               <button class="btn-cancel-add" title="取消" @click="isCreatingFolder = false">
-                <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
+                <SvgIcon name="close" size="13" />
               </button>
             </div>
           </div>
@@ -229,27 +196,111 @@
     <!-- 下方主体滚动内容区 (居中最大宽度 1200px) -->
     <main class="bookmarks-main-content">
       <div class="bookmark-grid-container">
-        <!-- 当前文件夹激活提示条 (当点击某文件夹时显示) -->
+        <!-- 多级面包屑与当前文件夹操作条 (当激活文件夹非 'all' 时展示) -->
         <div v-if="activeFolder !== 'all'" class="active-folder-header-bar">
           <div class="folder-header-left">
-            <span class="current-folder-chip">
-              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
-              <span>当前文件夹：<strong>{{ activeFolder }}</strong></span>
-            </span>
+            <!-- 面包屑导航 (支持点击跳转与拖拽放入/移出) -->
+            <nav class="folder-breadcrumbs-trail" aria-label="文件夹层级路径">
+              <span
+                class="breadcrumb-node breadcrumb-root"
+                :class="{ 'is-drop-target': dragOverTarget === 'all' }"
+                title="全部书签根目录 (拖拽至此移出至根目录)"
+                @click="activeFolder = 'all'"
+                @dragover.prevent="handleFolderDragOver($event, 'all')"
+                @dragleave="handleFolderDragLeave($event, 'all')"
+                @drop="handleFolderDrop($event, 'all')"
+              >
+                全部
+              </span>
+
+              <div class="breadcrumbs-dynamic-trail">
+                <span
+                  v-for="(crumb, idx) in activeFolderBreadcrumbs"
+                  :key="crumb.path"
+                  class="breadcrumb-item-wrapper"
+                >
+                  <span class="breadcrumb-separator">/</span>
+                  <span
+                    class="breadcrumb-node"
+                    :class="{
+                      'breadcrumb-current': idx === activeFolderBreadcrumbs.length - 1,
+                      'is-drop-target': dragOverTarget === crumb.path
+                    }"
+                    :title="idx === activeFolderBreadcrumbs.length - 1 ? `当前所在文件夹：${crumb.name}` : `跳转至：${crumb.name} (可拖拽放入此层级)`"
+                    @click="activeFolder = crumb.path"
+                    @dragover.prevent="handleFolderDragOver($event, crumb.path)"
+                    @dragleave="handleFolderDragLeave($event, crumb.path)"
+                    @drop="handleFolderDrop($event, crumb.path)"
+                  >
+                    {{ crumb.name }}
+                  </span>
+                </span>
+              </div>
+            </nav>
+
             <span class="folder-stats-text">共 {{ filteredAndSortedBookmarks.length }} 条书签</span>
           </div>
 
-          <div class="folder-header-right">
+          <div v-if="activeFolder !== 'uncategorized'" class="folder-header-right">
+            <!-- 移动文件夹/加入另一文件夹分类 按钮 (将当前文件夹加入到另一个文件夹或移至根目录) -->
+            <button class="folder-action-pill" title="将当前文件夹加入到另一个文件夹或移至根目录" @click="openMoveFolderModal(activeFolder)">
+              <SvgIcon name="folder" size="12" />
+              <span>分类</span>
+            </button>
+
+            <!-- 如果是子文件夹，提供一键移出到根目录 -->
+            <button
+              v-if="activeFolder.includes('/')"
+              class="folder-action-pill btn-move-out"
+              title="将此文件夹移出到顶级根目录"
+              @click="handleMoveOutToRoot(activeFolder)"
+            >
+              <SvgIcon name="cornerUpLeft" size="12" />
+              <span>移出到根目录</span>
+            </button>
+
             <button class="folder-action-pill" title="重命名当前文件夹" @click="startRenameFolder(activeFolder)">
-              <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.edit"></svg>
+              <SvgIcon name="edit" size="12" />
               <span>重命名</span>
             </button>
             <button class="folder-action-pill btn-danger-pill" title="删除此文件夹" @click="handleDeleteFolder(activeFolder)">
-              <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.trash"></svg>
+              <SvgIcon name="trash" size="12" />
               <span>删除文件夹</span>
             </button>
             <button class="folder-action-pill btn-view-all" title="查看所有书签" @click="activeFolder = 'all'">
-              <span>查看全部书签</span>
+              <span>查看全部</span>
+            </button>
+          </div>
+          <div v-else class="folder-header-right">
+            <button class="folder-action-pill btn-view-all" title="查看所有书签" @click="activeFolder = 'all'">
+              <span>查看全部</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 当前文件夹直属子分类快速导航栏 (如果当前激活文件夹有子文件夹) -->
+        <div v-if="activeFolder !== 'all' && activeFolder !== 'uncategorized' && activeDirectSubfolders.length > 0" class="subfolders-quick-nav-bar">
+          <div style="display: inline-flex; align-items: center; gap: 0.35rem;">
+            <SvgIcon name="folder" size="12" />
+            <span class="quick-nav-label">下级子文件夹:</span>
+          </div>
+          <div class="quick-subfolder-chips">
+            <button
+              v-for="subf in activeDirectSubfolders"
+              :key="subf.name"
+              class="quick-subfolder-chip"
+              :draggable="!isSelectMode"
+              :title="`点击进入 [${getFolderBaseName(subf.name)}]，可拖拽排序或移出`"
+              @click="activeFolder = subf.name"
+              @dragstart="handleFolderDragStart($event, subf.name)"
+              @dragend="handleFolderDragEnd"
+              @dragover.prevent="handleFolderDragOver($event, subf.name)"
+              @dragleave="handleFolderDragLeave($event, subf.name)"
+              @drop="handleFolderDrop($event, subf.name)"
+            >
+              <SvgIcon name="folder" size="12" />
+              <span>{{ getFolderBaseName(subf.name) }}</span>
+              <span class="chip-count">({{ getFolderBookmarks(subf.name, true).length }})</span>
             </button>
           </div>
         </div>
@@ -258,8 +309,18 @@
         <RenameFolderModal
           :is-open="isRenamingFolder"
           :folder-name="folderBeingRenamed"
+          :folders="folders"
           @close="isRenamingFolder = false"
           @submit="submitRenameFolderModal"
+        />
+
+        <!-- 移动文件夹/归入其他文件夹弹窗 -->
+        <MoveFolderModal
+          :is-open="isMoveFolderModalOpen"
+          :folder-name="folderBeingMoved"
+          :folders="folders"
+          @close="isMoveFolderModalOpen = false"
+          @move-folder="handleMoveFolderModalSubmit"
         />
 
         <!-- 移动端长按分类浮层 (已抽离独立组件) -->
@@ -289,50 +350,55 @@
           @import-bookmarks="handleImportFromModal"
         />
 
-        <!-- 空状态 -->
-        <div v-if="filteredAndSortedBookmarks.length === 0" class="empty-state">
-          <svg class="svg-icon empty-icon" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
-          <h3 class="empty-title">暂无相关书签</h3>
-          <p class="empty-sub">
-            {{ activeFolder !== 'all' ? `分类 [${activeFolder}] 下暂无书签，可从下方长按拖拽卡片至此文件夹归类。` : '在首页输入任意网页链接生成总结后，点击“保存到书签”即可自动沉淀到这里。' }}
-          </p>
-          <button v-if="activeFolder !== 'all'" class="btn-secondary btn-sm" style="margin-top: 0.75rem;" @click="activeFolder = 'all'">
-            返回查看全部书签
-          </button>
-        </div>
+        <!-- 核心内容展示区 (空状态 / 书签卡片网格) -->
+        <div class="bookmarks-content-area">
+          <!-- 空状态 -->
+          <div v-if="filteredAndSortedBookmarks.length === 0" class="empty-state">
+            <SvgIcon name="bookmark" size="38" extra-class="empty-icon" />
+            <h3 class="empty-title">暂无相关书签</h3>
+            <p class="empty-sub">
+              {{ activeFolder !== 'all' ? `分类 [${activeFolder}] 下暂无书签，可从下方长按拖拽卡片至此文件夹归类。` : '在首页输入任意网页链接生成总结后，点击“保存到书签”即可自动沉淀到这里。' }}
+            </p>
+            <button v-if="activeFolder !== 'all'" class="btn-secondary btn-sm" style="margin-top: 0.75rem;" @click="activeFolder = 'all'">
+              返回查看全部书签
+            </button>
+          </div>
 
-        <!-- 书签网格列表 (组件化 + 分批极速渲染 + 支持桌面拖拽与移动端长按归类) -->
-        <div v-else class="cards-grid" :class="[`grid-cols-${columns}`]">
-          <BookmarkCard
-            v-for="bm in displayedBookmarks"
-            :key="bm.id"
-            :bookmark="bm"
-            :is-editing="editingBookmarkId === bm.id"
-            :edit-text="inlineEditText"
-            :is-dragging="draggedBookmarkId === bm.id"
-            :is-select-mode="isSelectMode"
-            :is-selected="selectedBookmarkIds.has(bm.id)"
-            @dragstart="handleDragStart"
-            @dragend="handleDragEnd"
-            @long-press="handleMobileLongPress"
-            @open-mobile-folder-select="handleMobileLongPress"
-            @filter-folder="activeFolder = $event"
-            @remove-from-folder="handleRemoveBmFromFolder"
-            @toggle-pin="togglePin"
-            @toggle-select="toggleSelectBookmark"
-            @start-inline-edit="startInlineEdit"
-            @cancel-inline-edit="cancelInlineEdit"
-            @save-inline-edit="saveInlineEdit"
-            @update-edit-text="inlineEditText = $event"
-            @delete="handleDelete"
-          />
-        </div>
+          <!-- 书签网格列表 (组件化 + 分批极速渲染 + 支持桌面拖拽与移动端长按归类) -->
+          <div v-else class="cards-grid-wrapper">
+            <div class="cards-grid" :class="[`grid-cols-${effectiveColumns}`]">
+              <BookmarkCard
+                v-for="bm in displayedBookmarks"
+                :key="bm.id"
+                :bookmark="bm"
+                :is-editing="editingBookmarkId === bm.id"
+                :edit-text="inlineEditText"
+                :is-dragging="draggedBookmarkId === bm.id"
+                :is-select-mode="isSelectMode"
+                :is-selected="selectedBookmarkIds.has(bm.id)"
+                @dragstart="handleDragStart"
+                @dragend="handleDragEnd"
+                @long-press="handleMobileLongPress"
+                @open-mobile-folder-select="handleMobileLongPress"
+                @filter-folder="activeFolder = $event"
+                @remove-from-folder="handleRemoveBmFromFolder"
+                @toggle-pin="togglePin"
+                @toggle-select="toggleSelectBookmark"
+                @start-inline-edit="startInlineEdit"
+                @cancel-inline-edit="cancelInlineEdit"
+                @save-inline-edit="saveInlineEdit"
+                @update-edit-text="inlineEditText = $event"
+                @delete="handleDelete"
+              />
+            </div>
 
-        <!-- 海量数据平滑分批展示 (防卡顿) -->
-        <div v-if="filteredAndSortedBookmarks.length > displayLimit" class="load-more-box">
-          <button type="button" class="btn-secondary btn-sm btn-load-more" @click="displayLimit += 40">
-            <span>加载更多书签 (已显示 {{ displayedBookmarks.length }} / 共 {{ filteredAndSortedBookmarks.length }} 条)</span>
-          </button>
+            <!-- 海量数据平滑分批展示 (防卡顿) -->
+            <div v-if="filteredAndSortedBookmarks.length > displayLimit" class="load-more-box">
+              <button type="button" class="btn-secondary btn-sm btn-load-more" @click="displayLimit += 40">
+                <span>加载更多书签 (已显示 {{ displayedBookmarks.length }} / 共 {{ filteredAndSortedBookmarks.length }} 条)</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -348,12 +414,12 @@
 
       <div class="bulk-actions-group">
         <button class="btn-bulk-act btn-primary-bulk" :disabled="selectedBookmarkIds.size === 0" @click="isExportModalOpen = true">
-          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.download"></svg>
+          <SvgIcon name="download" size="13" />
           <span>导出所选 ({{ selectedBookmarkIds.size }})</span>
         </button>
 
         <button class="btn-bulk-act btn-danger-bulk" :disabled="selectedBookmarkIds.size === 0" @click="batchDeleteSelected">
-          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.trash"></svg>
+          <SvgIcon name="trash" size="13" />
           <span>批量删除</span>
         </button>
 
@@ -369,9 +435,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import SvgIcon from '../components/SvgIcon.vue'
 import BookmarkCard from '../components/BookmarkCard.vue'
+import FolderTabItem from '../components/FolderTabItem.vue'
+import FolderCascadeMenu from '../components/FolderCascadeMenu.vue'
 import RenameFolderModal from '../components/RenameFolderModal.vue'
+import MoveFolderModal from '../components/MoveFolderModal.vue'
 import MobileFolderSelectModal from '../components/MobileFolderSelectModal.vue'
 import ExportBookmarkModal from '../components/ExportBookmarkModal.vue'
 import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
@@ -385,9 +455,12 @@ const {
   columns,
   searchQuery,
   filteredAndSortedBookmarks,
+  uncategorizedBookmarks,
   addFolder,
   renameFolder,
   deleteFolder,
+  reorderFolders,
+  moveFolder,
   assignBookmarkToFolder,
   removeBookmarkFromFolder,
   getBookmarksInFolder,
@@ -398,6 +471,80 @@ const {
   deleteBookmark,
   togglePin
 } = useBookmarks()
+
+// 文件夹层级与多级路径计算
+const getFolderBaseName = (path: string) => path.split('/').pop() || path
+const getFolderParentPath = (path: string) => path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : null
+
+const topLevelFolders = computed(() => {
+  return folders.value.filter(f => !f.name.includes('/'))
+})
+
+const getDirectSubfolders = (parentPath: string) => {
+  const prefix = parentPath + '/'
+  return folders.value.filter(f => f.name.startsWith(prefix) && !f.name.slice(prefix.length).includes('/'))
+}
+
+// 响应式屏幕断点监听 (1024 尺寸及以下列数自动映射适配)
+const isTabletOrBelow = ref(false)
+const updateScreenSize = () => {
+  if (typeof window !== 'undefined') {
+    isTabletOrBelow.value = window.innerWidth <= 1024
+  }
+}
+
+const effectiveColumns = computed(() => {
+  if (isTabletOrBelow.value && columns.value === 3) {
+    return 2
+  }
+  return columns.value
+})
+
+const handleDocumentClick = (e: MouseEvent | TouchEvent) => {
+  const target = e.target as HTMLElement
+  if (target && !target.closest('.folder-tab-wrapper') && !target.closest('.folder-hover-dropdown-bridge')) {
+    cascadePath.value = []
+  }
+}
+
+onMounted(() => {
+  updateScreenSize()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateScreenSize)
+    window.addEventListener('pointerdown', handleDocumentClick, { passive: true })
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateScreenSize)
+    window.removeEventListener('pointerdown', handleDocumentClick)
+  }
+})
+
+const isFolderOrDescendantActive = (folderPath: string) => {
+  return activeFolder.value === folderPath || activeFolder.value.startsWith(folderPath + '/')
+}
+
+const activeFolderBreadcrumbs = computed(() => {
+  if (activeFolder.value === 'all') return []
+  if (activeFolder.value === 'uncategorized' || activeFolder.value === '未分类') {
+    return [{ name: '未分类', path: 'uncategorized' }]
+  }
+  const segments = activeFolder.value.split('/').map(s => s.trim()).filter(Boolean)
+  const crumbs: Array<{ name: string; path: string }> = []
+  let current = ''
+  for (const seg of segments) {
+    current = current ? `${current}/${seg}` : seg
+    crumbs.push({ name: seg, path: current })
+  }
+  return crumbs
+})
+
+const activeDirectSubfolders = computed(() => {
+  if (activeFolder.value === 'all' || activeFolder.value === 'uncategorized' || activeFolder.value === '未分类') return []
+  return getDirectSubfolders(activeFolder.value)
+})
 
 // 导出与批量选择状态
 const isExportModalOpen = ref(false)
@@ -514,84 +661,319 @@ const handleCreateAndAssignFolder = async ({ bookmarkId, newFolderName }: { book
   showToast(`已创建并归入 [${newFolderName}]`)
 }
 
-// 文件夹悬停与操作状态
-const hoveredFolder = ref<string | null>(null)
-let hoverCloseTimer: any = null
+// 文件夹多级递归级联悬停路径与状态 (支持理论无限级嵌套)
+const cascadePath = ref<string[]>([])
+let cascadeCloseTimer: any = null
+
+const openCascadeLevel = (depth: number, folderName: string) => {
+  if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
+  const next = cascadePath.value.slice(0, depth)
+  next[depth] = folderName
+  cascadePath.value = next
+}
+
+const scheduleCloseCascade = () => {
+  if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
+  cascadeCloseTimer = setTimeout(() => {
+    cascadePath.value = []
+  }, 450)
+}
+
+const cancelCloseCascade = () => {
+  if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
+}
+
 const isCreatingFolder = ref(false)
 const newFolderName = ref('')
 const isRenamingFolder = ref(false)
 const folderBeingRenamed = ref('')
 const renamedFolderNewName = ref('')
 
-const submitRenameFolderModal = (newName: string) => {
-  if (!newName.trim() || newName.trim() === folderBeingRenamed.value) {
-    isRenamingFolder.value = false
-    return
-  }
-  renameFolder(folderBeingRenamed.value, newName.trim())
-  isRenamingFolder.value = false
-  showToast(`文件夹已更名为 [${newName.trim()}]`)
+const isMoveFolderModalOpen = ref(false)
+const folderBeingMoved = ref('')
+
+const openMoveFolderModal = (folderName: string) => {
+  folderBeingMoved.value = folderName
+  isMoveFolderModalOpen.value = true
 }
+
+const handleMoveFolderModalSubmit = async ({ folderName, targetParent }: { folderName: string; targetParent: string | null }) => {
+  const baseName = getFolderBaseName(folderName)
+  const success = await moveFolder(folderName, targetParent)
+  isMoveFolderModalOpen.value = false
+  if (success !== false) {
+    const newPath = targetParent ? `${targetParent}/${baseName}` : baseName
+    activeFolder.value = newPath
+    showToast(`已将文件夹 [${baseName}] 归入 [${targetParent || '顶级根目录'}]`)
+  } else {
+    showToast(`移动文件夹失败`)
+  }
+}
+
 
 const editingBookmarkId = ref<string | null>(null)
 const inlineEditText = ref('')
 const draggedBookmarkId = ref<string | null>(null)
-const dragOverFolder = ref<string | null>(null)
 
-const getFolderBookmarks = (folderName: string) => getBookmarksInFolder(folderName)
+// 文件夹拖拽状态 (同级调序 / 放入子级 / 移出根目录)
+const draggedFolderName = ref<string | null>(null)
+const dragOverTarget = ref<string | null>(null)
+const dragOverPosition = ref<'before' | 'after' | 'inside' | null>(null)
 
-const openFolderHover = (folderName: string) => {
-  if (hoverCloseTimer) clearTimeout(hoverCloseTimer)
-  hoveredFolder.value = folderName
-}
+const getFolderBookmarks = (folderName: string, includeSubfolders = false) => getBookmarksInFolder(folderName, includeSubfolders)
 
-const scheduleCloseFolderHover = () => {
-  hoverCloseTimer = setTimeout(() => { hoveredFolder.value = null }, 300)
-}
-
-const cancelCloseFolderHover = () => {
-  if (hoverCloseTimer) clearTimeout(hoverCloseTimer)
-}
-
-// 拖拽归类逻辑
-const handleDragStart = (e: DragEvent, bm: Bookmark) => {
-  draggedBookmarkId.value = bm.id
+// 浮窗内与卡片内书签拖拽统一处理器
+const handleBmDragStart = (e: DragEvent, bmId: string) => {
+  draggedBookmarkId.value = bmId
+  draggedFolderName.value = null
+  if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/inkgist-type', 'bookmark')
+    e.dataTransfer.setData('text/plain', bmId)
+  }
+}
+
+const handleBmDragEnd = () => {
+  draggedBookmarkId.value = null
+  dragOverTarget.value = null
+  dragOverPosition.value = null
+  scheduleCloseCascade()
+}
+
+// 文件夹与书签拖拽逻辑
+const handleFolderDragStart = (e: DragEvent, folderName: string) => {
+  draggedFolderName.value = folderName
+  draggedBookmarkId.value = null
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/inkgist-type', 'folder')
+    e.dataTransfer.setData('text/plain', folderName)
+  }
+}
+
+const handleFolderDragEnd = () => {
+  draggedFolderName.value = null
+  dragOverTarget.value = null
+  dragOverPosition.value = null
+  scheduleCloseCascade()
+}
+
+const handleFolderDragOver = (e: DragEvent, targetName: string) => {
+  // 1. 拖拽文件夹 (支持拖拽中心放入子级，拖拽边缘调序，并自动展开目标文件夹的级联预览以便选择放入具体子目录)
+  if (draggedFolderName.value) {
+    const src = draggedFolderName.value
+    if (targetName === src) return
+    if (targetName !== 'all' && (targetName.startsWith(src + '/') || targetName === src)) {
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (targetName === 'all') {
+      dragOverTarget.value = 'all'
+      dragOverPosition.value = 'inside'
+      return
+    }
+
+    const el = e.currentTarget as HTMLElement
+    const rect = el.getBoundingClientRect()
+    const relX = e.clientX - rect.left
+    const ratio = rect.width > 0 ? relX / rect.width : 0.5
+
+    // 带滞回滤波的区域判定，防止边缘抖动与高频闪烁 (Anti-jitter deadband)
+    const isCurrentTarget = dragOverTarget.value === targetName
+    const currentPos = isCurrentTarget ? dragOverPosition.value : null
+
+    if (currentPos === 'before') {
+      if (ratio > 0.25) {
+        dragOverPosition.value = ratio > 0.75 ? 'after' : 'inside'
+      }
+    } else if (currentPos === 'after') {
+      if (ratio < 0.75) {
+        dragOverPosition.value = ratio < 0.25 ? 'before' : 'inside'
+      }
+    } else {
+      // 当前是 inside 或初次进入
+      if (ratio < 0.20) {
+        dragOverPosition.value = 'before'
+      } else if (ratio > 0.80) {
+        dragOverPosition.value = 'after'
+      } else {
+        dragOverPosition.value = 'inside'
+      }
+    }
+
+    dragOverTarget.value = targetName
+
+    // 拖拽文件夹在目标分类上方悬停时，自动展开该分类的多级级联预览框
+    if (targetName !== 'all') {
+      const parts = targetName.split('/')
+      const fullPathChain: string[] = []
+      let cur = ''
+      for (const p of parts) {
+        cur = cur ? `${cur}/${p}` : p
+        fullPathChain.push(cur)
+      }
+      cascadePath.value = fullPathChain
+      if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
+    }
+    return
+  }
+
+  // 2. 拖拽书签卡片 (拖到文件夹或任意子文件夹上时，自动触发多级悬停展开与放置高亮)
+  if (draggedBookmarkId.value) {
+    e.preventDefault()
+    e.stopPropagation()
+    dragOverTarget.value = targetName
+    dragOverPosition.value = 'inside'
+
+    // 拖拽书签悬停时，自动展开对应的多级预览链条
+    if (targetName !== 'all') {
+      const parts = targetName.split('/')
+      const fullPathChain: string[] = []
+      let cur = ''
+      for (const p of parts) {
+        cur = cur ? `${cur}/${p}` : p
+        fullPathChain.push(cur)
+      }
+      cascadePath.value = fullPathChain
+      if (cascadeCloseTimer) clearTimeout(cascadeCloseTimer)
+    }
+  }
+}
+
+const handleFolderDragLeave = (e: DragEvent, targetName: string) => {
+  const currentTarget = e.currentTarget as HTMLElement
+  const relatedTarget = e.relatedTarget as HTMLElement
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) {
+    return
+  }
+  if (dragOverTarget.value === targetName) {
+    dragOverTarget.value = null
+    dragOverPosition.value = null
+  }
+}
+
+const handleFolderDrop = async (e: DragEvent, targetName: string) => {
+  e.preventDefault()
+  e.stopPropagation()
+  cascadePath.value = []
+
+  // 1. 书签放置归类 (支持放入任意深度的文件夹或子文件夹，或未分类/全部)
+  if (draggedBookmarkId.value) {
+    const bId = draggedBookmarkId.value
+    assignBookmarkToFolder(bId, targetName)
+    const targetBm = bookmarks.value.find(b => b.id === bId)
+    draggedBookmarkId.value = null
+    dragOverTarget.value = null
+    dragOverPosition.value = null
+    const label = (targetName === 'all' || targetName === 'uncategorized' || targetName === '未分类') ? (targetName === 'all' ? '全部' : '未分类') : targetName
+    showToast(`已将《${targetBm?.title?.slice(0, 12) || '书签'}》归入 [${label}]`)
+    return
+  }
+
+  // 2. 文件夹放置 (排序 / 放入 / 移出)
+  if (draggedFolderName.value) {
+    const src = draggedFolderName.value
+    const pos = dragOverPosition.value
+    draggedFolderName.value = null
+    dragOverTarget.value = null
+    dragOverPosition.value = null
+
+    if (!src || src === targetName) return
+
+    // 拖入 'all' 根目录 或 'uncategorized' -> 移出到根目录
+    if (targetName === 'all' || targetName === 'uncategorized') {
+      if (src.includes('/')) {
+        await moveFolder(src, null)
+        showToast(`已将文件夹 [${getFolderBaseName(src)}] 移出到根目录`)
+      }
+      return
+    }
+
+    // 放入目标文件夹成为子文件夹
+    if (pos === 'inside') {
+      const success = await moveFolder(src, targetName)
+      if (success) {
+        showToast(`已将 [${getFolderBaseName(src)}] 放入 [${targetName}] 成为子文件夹`)
+      }
+      return
+    }
+
+    // 前插或后插调整顺序
+    if (pos === 'before' || pos === 'after') {
+      const srcParent = getFolderParentPath(src)
+      const targetParent = getFolderParentPath(targetName)
+
+      let effectiveSrc = src
+      if (srcParent !== targetParent) {
+        await moveFolder(src, targetParent)
+        const baseName = getFolderBaseName(src)
+        effectiveSrc = targetParent ? `${targetParent}/${baseName}` : baseName
+      }
+
+      const currentList = [...folders.value]
+      const srcIndex = currentList.findIndex(f => f.name === effectiveSrc)
+      if (srcIndex !== -1) {
+        const [item] = currentList.splice(srcIndex, 1)
+        const targetIndex = currentList.findIndex(f => f.name === targetName)
+        if (targetIndex !== -1) {
+          const insertIndex = pos === 'before' ? targetIndex : targetIndex + 1
+          currentList.splice(insertIndex, 0, item)
+          await reorderFolders(currentList)
+          showToast(`已调整文件夹 [${getFolderBaseName(effectiveSrc)}] 的排序位置`)
+        }
+      }
+    }
+  }
+}
+
+const handleMoveOutToRoot = async (folderName: string) => {
+  if (!folderName.includes('/')) return
+  await moveFolder(folderName, null)
+  cascadePath.value = []
+  showToast(`已将 [${getFolderBaseName(folderName)}] 移出到根目录`)
+}
+
+// 书签卡片拖拽开始与结束
+const handleDragStart = (e: DragEvent, bm: Bookmark) => {
+  draggedBookmarkId.value = bm.id
+  draggedFolderName.value = null
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/inkgist-type', 'bookmark')
     e.dataTransfer.setData('text/plain', bm.id)
   }
 }
 
 const handleDragEnd = () => {
   draggedBookmarkId.value = null
-  dragOverFolder.value = null
+  dragOverTarget.value = null
+  dragOverPosition.value = null
+  scheduleCloseCascade()
 }
 
-const handleDragOverFolder = (folderName: string) => {
-  dragOverFolder.value = folderName
-}
-
-const handleDragLeaveFolder = (folderName: string) => {
-  if (dragOverFolder.value === folderName) {
-    dragOverFolder.value = null
+const submitNewFolder = async () => {
+  const name = newFolderName.value.trim()
+  if (!name) return
+  const lower = name.toLowerCase()
+  if (lower === 'all' || lower === 'uncategorized' || name === '全部' || name === '未分类') {
+    showToast('不能创建系统保留名称的文件夹')
+    return
   }
-}
-
-const handleDropFolder = (folderName: string) => {
-  if (!draggedBookmarkId.value) return
-  assignBookmarkToFolder(draggedBookmarkId.value, folderName)
-  const targetBm = bookmarks.value.find(b => b.id === draggedBookmarkId.value)
-  draggedBookmarkId.value = null
-  dragOverFolder.value = null
-  showToast(`已将《${targetBm?.title?.slice(0, 12) || '书签'}》归入 [${folderName === 'all' ? '全部' : folderName}]`)
-}
-
-const submitNewFolder = () => {
-  if (!newFolderName.value.trim()) return
-  addFolder(newFolderName.value.trim())
+  if (folders.value.some(f => f.name.toLowerCase() === lower)) {
+    showToast(`已存在名为 [${name}] 的文件夹，请勿重复创建`)
+    return
+  }
+  const success = await addFolder(name)
+  if (success === false) {
+    showToast(`文件夹 [${name}] 创建失败或已存在`)
+    return
+  }
   newFolderName.value = ''
   isCreatingFolder.value = false
-  showToast('文件夹已创建')
+  showToast(`已成功创建文件夹 [${name}]`)
 }
 
 const startRenameFolder = (folderName: string) => {
@@ -599,21 +981,61 @@ const startRenameFolder = (folderName: string) => {
   renamedFolderNewName.value = folderName
   isRenamingFolder.value = true
   hoveredFolder.value = null
+  hoveredSubfolder.value = null
 }
 
-const submitRenameFolder = () => {
-  if (!renamedFolderNewName.value.trim() || renamedFolderNewName.value.trim() === folderBeingRenamed.value) {
+const submitRenameFolder = async () => {
+  const trimmed = renamedFolderNewName.value.trim()
+  if (!trimmed || trimmed === folderBeingRenamed.value) {
     isRenamingFolder.value = false
     return
   }
-  renameFolder(folderBeingRenamed.value, renamedFolderNewName.value.trim())
+  const lower = trimmed.toLowerCase()
+  if (lower === 'all' || lower === 'uncategorized' || trimmed === '全部' || trimmed === '未分类') {
+    showToast('不能使用系统保留名称')
+    return
+  }
+  if (folders.value.some(f => f.name.toLowerCase() === lower && f.name !== folderBeingRenamed.value)) {
+    showToast(`已存在名为 [${trimmed}] 的文件夹，不能重复`)
+    return
+  }
+  const success = await renameFolder(folderBeingRenamed.value, trimmed)
   isRenamingFolder.value = false
-  showToast(`文件夹已更名为 [${renamedFolderNewName.value.trim()}]`)
+  if (success !== false) {
+    showToast(`文件夹已更名为 [${trimmed}]`)
+  } else {
+    showToast(`更名失败，已存在同名文件夹`)
+  }
+}
+
+const submitRenameFolderModal = async (newName: string) => {
+  const trimmed = newName.trim()
+  if (!trimmed || trimmed === folderBeingRenamed.value) {
+    isRenamingFolder.value = false
+    return
+  }
+  const lower = trimmed.toLowerCase()
+  if (lower === 'all' || lower === 'uncategorized' || trimmed === '全部' || trimmed === '未分类') {
+    showToast('不能使用系统保留名称')
+    return
+  }
+  if (folders.value.some(f => f.name.toLowerCase() === lower && f.name !== folderBeingRenamed.value)) {
+    showToast(`已存在名为 [${trimmed}] 的文件夹，不能重复`)
+    return
+  }
+  const success = await renameFolder(folderBeingRenamed.value, trimmed)
+  isRenamingFolder.value = false
+  if (success !== false) {
+    showToast(`文件夹已更名为 [${trimmed}]`)
+  } else {
+    showToast(`更名失败，已存在同名文件夹`)
+  }
 }
 
 const handleDeleteFolder = (folderName: string) => {
   deleteFolder(folderName)
   hoveredFolder.value = null
+  hoveredSubfolder.value = null
   showToast(`已删除分类 [${folderName}]`)
 }
 
@@ -922,6 +1344,11 @@ const extractActions = (bm: Bookmark): string[] => {
   flex-wrap: wrap;
   overflow: visible;
   padding-bottom: 0.25rem;
+  width: 100%;
+}
+
+.folders-tab-items-wrapper {
+  display: contents;
 }
 
 .folder-tab-wrapper {
@@ -929,41 +1356,106 @@ const extractActions = (bm: Bookmark): string[] => {
   display: inline-flex;
 }
 
+.folder-tab-wrapper.is-dragging-self {
+  opacity: 0.45;
+}
+
 .folder-tab-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.35rem 0.75rem;
+  padding: 0.38rem 0.8rem;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--text-muted);
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-subtle);
+  border: none;
   border-radius: var(--radius-full);
-  cursor: pointer;
+  cursor: grab;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+.folder-tab-btn * {
+  pointer-events: none;
+}
+.folder-tab-btn:active {
+  cursor: grabbing;
 }
 .folder-tab-btn:hover {
-  border-color: var(--text-main);
+  background-color: var(--bg-surface-hover);
   color: var(--text-main);
 }
 .folder-tab-btn.active {
   background-color: var(--primary);
   color: var(--primary-contrast) !important;
-  border-color: var(--primary);
   font-weight: 600;
 }
+
+/* 放入子文件夹中心高亮 (Nest Inside) - 纯背景柔光高亮，无任何边框与线框 */
+.folder-tab-wrapper.is-drag-over-inside .folder-tab-btn,
 .folder-tab-btn.is-drag-target {
-  border-color: var(--primary);
-  background-color: var(--bg-surface-hover);
-  transform: scale(1.06);
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.12);
+  background-color: var(--bg-surface-hover) !important;
+  color: var(--primary) !important;
+}
+
+/* 移出到根目录高亮 (Root All Tab) */
+.folder-tab-btn.root-all-tab.is-drag-over-root {
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #10b981 !important;
+}
+
+.subfolder-indicator {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--primary);
+  background-color: var(--bg-surface-subtle);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-full);
+  margin-left: -0.1rem;
+}
+.folder-tab-btn.active .subfolder-indicator {
+  color: var(--primary-contrast);
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 浮动提示徽标，绝对定位脱离文档流，杜绝改变按钮宽度造成死循环抖动 */
+.drag-hint-badge {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: var(--radius-full);
+  background-color: var(--primary);
+  color: var(--primary-contrast);
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  animation: fadeInBadge 0.15s ease;
+}
+
+@keyframes fadeInBadge {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .folder-count {
   font-size: 0.75rem;
   opacity: 0.8;
+}
+
+/* 文件夹悬停多级预览弹窗桥接容器 (绝对定位，紧贴 Tab 底部) */
+.folder-hover-dropdown-bridge {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  padding-top: 0.35rem;
+  z-index: 120;
 }
 
 /* 仅下边缘是雾化效果的水墨过渡层 (紧贴 header 底部，全宽延伸) */
@@ -996,7 +1488,7 @@ const extractActions = (bm: Bookmark): string[] => {
   max-width: 100%;
 }
 
-/* 当前激活文件夹提示条 */
+/* 当前激活文件夹面包屑与操作条 */
 .active-folder-header-bar {
   display: flex;
   align-items: center;
@@ -1004,24 +1496,61 @@ const extractActions = (bm: Bookmark): string[] => {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 0.6rem 1rem;
-  margin-bottom: 1.25rem;
+  padding: 0.65rem 1.15rem;
+  margin-bottom: 0.85rem;
   box-shadow: var(--shadow-xs);
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .folder-header-left {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.85rem;
+  flex-wrap: wrap;
 }
 
-.current-folder-chip {
+/* 面包屑导航样式 (支持点击与拖拽放置) */
+.folder-breadcrumbs-trail {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.875rem;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-subtle);
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.breadcrumb-node {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+.breadcrumb-node:hover {
+  color: var(--primary);
+  background-color: var(--bg-surface-hover);
+}
+.breadcrumb-node.breadcrumb-root {
+  font-weight: 600;
+}
+.breadcrumb-node.breadcrumb-current {
   color: var(--text-main);
-  white-space: nowrap;
+  font-weight: 700;
+  cursor: default;
+}
+.breadcrumb-node.is-drop-target {
+  background-color: var(--primary-50);
+  color: var(--primary);
+  outline: 2px dashed var(--primary);
+}
+
+.breadcrumb-separator {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
 }
 
 .folder-stats-text {
@@ -1048,10 +1577,20 @@ const extractActions = (bm: Bookmark): string[] => {
   color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
+  transition: all 0.15s ease;
 }
 .folder-action-pill:hover {
   color: var(--text-main);
   border-color: var(--text-main);
+}
+.folder-action-pill.btn-move-out {
+  color: var(--primary);
+  border-color: var(--border-strong);
+  font-weight: 500;
+}
+.folder-action-pill.btn-move-out:hover {
+  background-color: var(--primary-50);
+  border-color: var(--primary);
 }
 .folder-action-pill.btn-danger-pill:hover {
   color: var(--danger);
@@ -1062,6 +1601,57 @@ const extractActions = (bm: Bookmark): string[] => {
   color: var(--primary-contrast) !important;
   border-color: var(--primary);
   font-weight: 500;
+}
+
+/* 当前文件夹下级子分类快速导航栏 */
+.subfolders-quick-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.85rem;
+  background-color: var(--bg-surface-subtle);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 1.15rem;
+  overflow-x: auto;
+}
+
+.quick-nav-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.quick-subfolder-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.quick-subfolder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--text-main);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: grab;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.quick-subfolder-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+.quick-subfolder-chip .chip-count {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
 }
 
 /* 文件夹悬停预览弹窗 */
@@ -1087,6 +1677,210 @@ const extractActions = (bm: Bookmark): string[] => {
   gap: 0.5rem;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+
+/* 文件夹中子文件夹展示与二级级联预览 */
+.dropdown-subfolders-section {
+  padding-bottom: 0.45rem;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.subfolders-header-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.subfolder-preview-tip {
+  font-size: 0.625rem;
+  color: var(--text-subtle);
+  font-weight: normal;
+}
+
+.subfolders-pills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.subfolder-pill-wrapper {
+  position: relative;
+}
+
+.subfolder-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.subfolder-pill:hover,
+.subfolder-pill.is-active-sub {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.subfolder-pill-name {
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+.subfolder-pill-count {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-right: auto;
+  padding-left: 0.25rem;
+}
+.subfolder-arrow-indicator {
+  font-size: 0.8125rem;
+  color: var(--text-subtle);
+}
+
+/* 二级子文件夹级联悬停预览弹窗 (Cascading Preview Flyout) */
+.subfolder-cascade-flyout {
+  position: absolute;
+  left: 100%;
+  top: -10px;
+  padding-left: 0.5rem;
+  z-index: 130;
+}
+
+.cascade-preview-box {
+  min-width: 280px;
+  max-width: 340px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2xl);
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.cascade-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 0.5rem;
+}
+
+.cascade-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.cascade-title {
+  font-size: 0.75rem;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cascade-path {
+  font-size: 0.625rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+.cascade-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.btn-cascade-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-cascade-act:hover {
+  color: var(--text-main);
+  border-color: var(--text-main);
+}
+.btn-cascade-act.btn-cascade-enter {
+  background-color: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+
+.cascade-bm-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cascade-empty {
+  font-size: 0.6875rem;
+  color: var(--text-subtle);
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.cascade-bm-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.35rem;
+  border-radius: var(--radius-xs);
+  font-size: 0.6875rem;
+}
+.cascade-bm-item-row:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.cascade-bm-link {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-main);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.cascade-bm-link:hover {
+  color: var(--link-blue);
+  text-decoration: underline;
+}
+.cascade-bullet {
+  color: var(--text-subtle);
+}
+.cascade-bm-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dropdown-header {
@@ -1834,17 +2628,16 @@ const extractActions = (bm: Bookmark): string[] => {
     flex-wrap: nowrap !important;
   }
 
-  .header-right-actions .nav-action-btn span,
-  .header-right-actions .nav-logout-btn span,
-  .header-right-actions .theme-toggle-btn span,
-  .header-right-actions .nav-switch-btn span {
+  /* 768 尺寸下：前两个按钮（批量管理、导出）为紧凑纯图标，退出登录、主题切换与首页按钮均保留完整文字与图标 */
+  .header-right-actions .nav-action-btn span:not(.svg-icon-wrap) {
     display: none !important;
   }
 
-  .header-right-actions .nav-action-btn,
-  .header-right-actions .nav-logout-btn,
-  .header-right-actions .theme-toggle-btn,
-  .header-right-actions .nav-switch-btn {
+  .header-right-actions .svg-icon-wrap {
+    display: inline-flex !important;
+  }
+
+  .header-right-actions .nav-action-btn {
     padding: 0 !important;
     width: 32px !important;
     min-width: 32px !important;
@@ -1856,6 +2649,32 @@ const extractActions = (bm: Bookmark): string[] => {
     border-radius: var(--radius-full) !important;
     box-sizing: border-box !important;
     flex-shrink: 0 !important;
+  }
+
+  .header-right-actions .nav-logout-btn,
+  .header-right-actions .theme-toggle-btn,
+  .header-right-actions .nav-switch-btn {
+    height: 32px !important;
+    padding: 0 0.75rem !important;
+    width: auto !important;
+    min-width: auto !important;
+    max-width: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.35rem !important;
+    border-radius: var(--radius-full) !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .header-right-actions .nav-logout-btn span,
+  .header-right-actions .theme-toggle-btn span,
+  .header-right-actions .nav-switch-btn span {
+    display: inline-flex !important;
+    align-items: center !important;
+    line-height: 1 !important;
   }
 
   /* 第 2 行：搜索框换行占满整行 */
@@ -1964,6 +2783,25 @@ const extractActions = (bm: Bookmark): string[] => {
     white-space: nowrap !important;
     padding: 0.22rem 0.55rem !important;
     font-size: 0.75rem !important;
+  }
+}
+
+/* 640px 及以下移动端尺寸 (425px, 375px)：所有 5 个按钮统一收缩为极简纯图标模式，严防折行 */
+@media (max-width: 640px) {
+  .header-right-actions .nav-logout-btn span:not(.svg-icon-wrap),
+  .header-right-actions .theme-toggle-btn span:not(.svg-icon-wrap),
+  .header-right-actions .nav-switch-btn span:not(.svg-icon-wrap) {
+    display: none !important;
+  }
+
+  .header-right-actions .nav-logout-btn,
+  .header-right-actions .theme-toggle-btn,
+  .header-right-actions .nav-switch-btn {
+    padding: 0 !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    height: 32px !important;
   }
 }
 

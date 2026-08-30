@@ -5,11 +5,11 @@
       
       <div class="sheet-header">
         <div class="sheet-title-group">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+          <SvgIcon name="folder" size="16" />
           <span id="modal-folder-title" class="sheet-title">移动书签至文件夹</span>
         </div>
         <button class="sheet-close-btn" aria-label="关闭文件夹选择弹窗" @click="$emit('close')">
-          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
+          <SvgIcon name="close" size="14" />
         </button>
       </div>
 
@@ -26,39 +26,46 @@
           @click="selectFolder('all')"
         >
           <div class="item-left">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+            <SvgIcon name="folder" size="14" />
             <span>未分类 (移出所有分类)</span>
           </div>
           <span v-if="currentFolder === undefined || currentFolder === 'all'" class="check-mark">✓</span>
         </button>
 
-        <!-- 各自定义分类 -->
+        <!-- 各自定义分类 (层级分明展示，子文件夹独立展示名称并缩进显示父级归属) -->
         <button
-          v-for="folder in folders"
-          :key="folder.id"
+          v-for="item in formattedFolderOptions"
+          :key="item.fullName"
           class="folder-select-item"
-          :class="{ active: currentFolder === folder.name }"
-          @click="selectFolder(folder.name)"
+          :class="{
+            active: currentFolder === item.fullName,
+            'is-subfolder-row': item.depth > 0
+          }"
+          :style="{ paddingLeft: item.depth > 0 ? `calc(0.75rem + ${item.depth * 1.1}rem)` : undefined }"
+          :title="item.parentPath ? `[${item.baseName}] (属于上级分类: ${item.parentPath})` : item.baseName"
+          @click="selectFolder(item.fullName)"
         >
           <div class="item-left">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
-            <span class="folder-text">{{ folder.name }}</span>
+            <span v-if="item.depth > 0" class="subfolder-indent-symbol">└─</span>
+            <SvgIcon name="folder" size="14" />
+            <span class="folder-text">{{ item.baseName }}</span>
+            <span v-if="item.parentPath" class="folder-parent-badge">{{ item.parentPath }}</span>
           </div>
-          <span v-if="currentFolder === folder.name" class="check-mark">✓</span>
+          <span v-if="currentFolder === item.fullName" class="check-mark">✓</span>
         </button>
       </div>
 
       <!-- 新建文件夹快捷入口 -->
       <div class="sheet-footer-new-folder">
         <div v-if="!isCreating" class="new-folder-trigger" @click="isCreating = true">
-          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.plus"></svg>
+          <SvgIcon name="plus" size="14" />
           <span>新建分类文件夹</span>
         </div>
         <div v-else class="new-folder-form">
           <input
             v-model="newFolderName"
             type="text"
-            placeholder="输入新文件夹名称..."
+            placeholder="输入新文件夹名称(支持 父/子)..."
             class="folder-input-field"
             aria-label="新分类文件夹名称"
             autoFocus
@@ -66,10 +73,10 @@
             @keydown.esc="isCreating = false"
           />
           <button class="btn-action btn-confirm" aria-label="确认创建" @click="handleCreateAndAssign">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.check"></svg>
+            <SvgIcon name="check" size="14" />
           </button>
           <button class="btn-action btn-cancel" aria-label="取消创建" @click="isCreating = false">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
+            <SvgIcon name="close" size="14" />
           </button>
         </div>
       </div>
@@ -78,7 +85,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import SvgIcon from './SvgIcon.vue'
 import { ICONS, type BookmarkFolder } from '../pages/state'
 
 const props = defineProps<{
@@ -97,6 +105,34 @@ const emit = defineEmits<{
 
 const isCreating = ref(false)
 const newFolderName = ref('')
+
+interface FormattedFolderOption {
+  id: string
+  fullName: string
+  baseName: string
+  parentPath: string | null
+  depth: number
+}
+
+// 格式化为树形层级排序，让每个文件夹独立展示名称并缩进
+const formattedFolderOptions = computed<FormattedFolderOption[]>(() => {
+  if (!props.folders || props.folders.length === 0) return []
+  
+  const all = props.folders.map(f => {
+    const parts = f.name.split('/')
+    return {
+      id: f.id,
+      fullName: f.name,
+      baseName: parts[parts.length - 1],
+      parentPath: parts.length > 1 ? parts.slice(0, -1).join('/') : null,
+      depth: parts.length - 1
+    }
+  })
+
+  // 按自然树状层级顺序排序
+  all.sort((a, b) => a.fullName.localeCompare(b.fullName, 'zh-CN'))
+  return all
+})
 
 watch(
   () => props.isOpen,
@@ -124,8 +160,23 @@ const selectFolder = (folderName: string) => {
 }
 
 const handleCreateAndAssign = () => {
-  if (!newFolderName.value.trim()) return
-  emit('create-and-assign', { bookmarkId: props.bookmarkId, newFolderName: newFolderName.value.trim() })
+  const trimmed = newFolderName.value.trim()
+  if (!trimmed) return
+  const lower = trimmed.toLowerCase()
+  if (lower === 'all' || lower === 'uncategorized' || trimmed === '全部' || trimmed === '未分类') {
+    selectFolder('all')
+    isCreating.value = false
+    newFolderName.value = ''
+    return
+  }
+  const existing = props.folders.find(f => f.name.toLowerCase() === lower)
+  if (existing) {
+    selectFolder(existing.name)
+    isCreating.value = false
+    newFolderName.value = ''
+    return
+  }
+  emit('create-and-assign', { bookmarkId: props.bookmarkId, newFolderName: trimmed })
   newFolderName.value = ''
   isCreating.value = false
   emit('close')
@@ -247,10 +298,40 @@ const handleCreateAndAssign = () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.subfolder-indent-symbol {
+  color: var(--text-muted);
+  font-family: monospace;
+  font-size: 0.8125rem;
+  opacity: 0.7;
+}
+
+.folder-parent-badge {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-xs);
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+
+.folder-select-item.active .folder-parent-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--primary-contrast);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.folder-select-item.active .subfolder-indent-symbol {
+  color: var(--primary-contrast);
 }
 
 .folder-text {
-  max-width: 260px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

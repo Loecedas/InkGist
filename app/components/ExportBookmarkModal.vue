@@ -476,15 +476,16 @@ const handleExport = async () => {
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 16px;
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-xl, 0 20px 40px -15px rgba(0, 0, 0, 0.4));
   display: flex;
   flex-direction: column;
   overflow: hidden;
   animation: modalScaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   overscroll-behavior: contain;
+  color: var(--text-main);
 }
 
 @keyframes modalScaleIn {
@@ -497,8 +498,9 @@ const handleExport = async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  background: var(--bg-surface);
 }
 
 .header-title-group {
@@ -510,12 +512,12 @@ const handleExport = async () => {
 .header-title-group h3 {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
   margin: 0;
 }
 
 .modal-icon {
-  color: var(--color-primary, #1e293b);
+  color: var(--text-main);
   display: inline-flex;
 }
 
@@ -523,7 +525,7 @@ const handleExport = async () => {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -533,8 +535,8 @@ const handleExport = async () => {
 }
 
 .close-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--text-primary, #0f172a);
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 .modal-body {
@@ -545,12 +547,13 @@ const handleExport = async () => {
   overflow-y: auto;
   flex: 1;
   overscroll-behavior: contain;
+  background: var(--bg-surface);
 }
 
 .form-label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
+  color: var(--text-main);
   margin-bottom: 0.5rem;
   display: block;
 }
@@ -569,9 +572,9 @@ const handleExport = async () => {
   padding: 0.65rem 0.75rem;
   min-height: 46px;
   border-radius: 8px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  background: var(--bg-card-sub, #f8fafc);
-  color: var(--text-secondary, #64748b);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-subtle);
+  color: var(--text-muted);
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
@@ -589,16 +592,17 @@ const handleExport = async () => {
 }
 
 .format-pill-btn:hover {
-  border-color: #94a3b8;
-  color: var(--text-primary, #0f172a);
+  border-color: var(--border-focus, var(--text-main));
+  color: var(--text-main);
+  background: var(--bg-surface-hover);
 }
 
 .format-pill-btn.active {
-  background: var(--text-primary, #0f172a);
-  color: #ffffff;
-  border-color: var(--text-primary, #0f172a);
+  background: var(--primary);
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary);
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .format-pill-full {
@@ -608,8 +612,8 @@ const handleExport = async () => {
 
 /* Karakeep 直连配置卡片 */
 .karakeep-config-card {
-  background: var(--bg-card-sub, #f8fafc);
-  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   padding: 0.85rem 1rem;
   display: flex;
@@ -626,22 +630,22 @@ const handleExport = async () => {
 .karakeep-badge-title {
   font-size: 0.85rem;
   font-weight: 700;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
 }
 
 .btn-test-conn {
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.25rem 0.65rem;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
   cursor: pointer;
   transition: all 0.15s;
 }
 .btn-test-conn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-surface-hover);
 }
 
 .karakeep-fields-group {
@@ -659,19 +663,22 @@ const handleExport = async () => {
 .field-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-secondary, #475569);
+  color: var(--text-muted);
 }
 
 .karakeep-input {
   width: 100%;
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.45rem 0.65rem;
   font-size: 0.8125rem;
   outline: none;
-  background: var(--bg-input, #ffffff);
-  color: var(--text-primary, #0f172a);
+  background: var(--bg-surface);
+  color: var(--text-main);
   box-sizing: border-box;
+}
+.karakeep-input:focus {
+  border-color: var(--primary);
 }
 
 .karakeep-status-pill {
@@ -681,21 +688,22 @@ const handleExport = async () => {
   font-weight: 500;
 }
 .karakeep-status-pill.is-ok {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
 }
 .karakeep-status-pill.is-err {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 .karakeep-mapping-hint {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  background: rgba(15, 23, 42, 0.03);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   padding: 0.5rem 0.65rem;
   border-radius: 6px;
 }
@@ -703,7 +711,7 @@ const handleExport = async () => {
 .mapping-title {
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
 }
 
 .mapping-grid {
@@ -714,45 +722,16 @@ const handleExport = async () => {
 
 .map-tag {
   font-size: 0.6875rem;
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.1rem 0.35rem;
-  color: var(--text-secondary, #475569);
+  color: var(--text-muted);
 }
 
 .syncing-indicator {
-  color: #2563eb;
+  color: var(--primary);
   font-weight: 600;
-}
-
-.format-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.65rem 0.85rem;
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  background: var(--bg-card-sub, #f8fafc);
-  color: var(--text-secondary, #64748b);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  white-space: nowrap;
-}
-
-.format-pill-btn:hover {
-  border-color: #94a3b8;
-  color: var(--text-primary, #0f172a);
-}
-
-.format-pill-btn.active {
-  background: var(--text-primary, #0f172a);
-  color: #ffffff;
-  border-color: var(--text-primary, #0f172a);
-  font-weight: 600;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
 }
 
 .scope-options-grid {
@@ -766,19 +745,21 @@ const handleExport = async () => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   cursor: pointer;
-  transition: border-color 0.2s;
-  background: var(--bg-card-sub, #f8fafc);
+  transition: all 0.2s;
+  background: var(--bg-surface-subtle);
 }
 
 .scope-option-card:hover {
-  border-color: #94a3b8;
+  border-color: var(--border-focus, var(--text-muted));
+  background: var(--bg-surface-hover);
 }
 
 .scope-option-card.active {
-  border-color: var(--text-primary, #0f172a);
+  border-color: var(--primary);
+  background: var(--bg-surface-hover);
 }
 
 .scope-arrow-box {
@@ -791,14 +772,14 @@ const handleExport = async () => {
 }
 
 .scope-arrow {
-  color: var(--text-secondary, #94a3b8);
-  opacity: 0.25;
+  color: var(--text-muted);
+  opacity: 0.45;
   transform: translateX(-2px);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .scope-option-card.active .scope-arrow {
-  color: var(--text-primary, #0f172a);
+  color: var(--primary);
   opacity: 1;
   transform: translateX(2px);
 }
@@ -812,12 +793,12 @@ const handleExport = async () => {
 .scope-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
 }
 
 .scope-desc {
   font-size: 0.75rem;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
 }
 
 /* 自定义勾选列表面板 (支持独立平滑滚动) */
@@ -825,10 +806,10 @@ const handleExport = async () => {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 0.75rem;
-  background: var(--bg-card-sub, #f8fafc);
+  background: var(--bg-surface-subtle);
   animation: fadeIn 0.2s ease;
 }
 
@@ -845,29 +826,32 @@ const handleExport = async () => {
 
 .custom-search-input {
   flex: 1;
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.4rem 0.65rem;
   font-size: 0.8125rem;
   outline: none;
-  background: var(--bg-input, #ffffff);
-  color: var(--text-primary, #0f172a);
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+.custom-search-input:focus {
+  border-color: var(--primary);
 }
 
 .btn-picker-action {
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.4rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 500;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s;
 }
 .btn-picker-action:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-surface-hover);
 }
 
 .custom-bookmarks-checklist {
@@ -877,8 +861,8 @@ const handleExport = async () => {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.4rem;
 }
@@ -892,34 +876,36 @@ const handleExport = async () => {
   cursor: pointer;
   font-size: 0.78125rem;
   transition: background 0.1s;
+  color: var(--text-main);
 }
 .custom-bm-item:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--bg-surface-hover);
 }
 .custom-bm-item.is-checked {
-  background: rgba(15, 23, 42, 0.06);
+  background: var(--bg-surface-subtle);
 }
 
 .custom-bm-cb {
   cursor: pointer;
   flex-shrink: 0;
-  accent-color: var(--primary, #0f172a);
+  accent-color: var(--primary);
   pointer-events: none;
 }
 
 .custom-folder-tag {
   font-size: 0.6875rem;
-  background: var(--bg-card-sub, #f1f5f9);
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .custom-bm-title {
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -928,7 +914,7 @@ const handleExport = async () => {
 }
 
 .custom-bm-url {
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -938,17 +924,17 @@ const handleExport = async () => {
 .custom-empty-hint {
   padding: 1.5rem;
   text-align: center;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
   font-size: 0.75rem;
 }
 
 .input-with-ext {
   display: flex;
   align-items: center;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg-input, #ffffff);
+  background: var(--bg-surface);
 }
 
 .input-flat {
@@ -958,19 +944,19 @@ const handleExport = async () => {
   padding: 0.55rem 0.85rem;
   font-size: 0.875rem;
   background: transparent;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
 }
 
 .file-ext {
   padding-right: 0.85rem;
   font-size: 0.85rem;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
   font-family: monospace;
 }
 
 .eco-compatibility-box {
-  background: rgba(15, 23, 42, 0.03);
-  border: 1px dashed var(--border-color, #cbd5e1);
+  background: var(--bg-surface-subtle);
+  border: 1px dashed var(--border-subtle);
   border-radius: 10px;
   padding: 0.75rem 1rem;
 }
@@ -978,14 +964,14 @@ const handleExport = async () => {
 .eco-title {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
   margin-bottom: 0.3rem;
 }
 
 .eco-desc {
   font-size: 0.75rem;
   line-height: 1.45;
-  color: var(--text-secondary, #475569);
+  color: var(--text-muted);
   margin-bottom: 0.45rem;
 }
 
@@ -997,30 +983,30 @@ const handleExport = async () => {
 
 .eco-pill {
   font-size: 0.7rem;
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.15rem 0.45rem;
-  color: var(--text-secondary, #475569);
+  color: var(--text-muted);
 }
 
 .modal-footer {
   padding: 1rem 1.5rem;
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg-card-sub, #fafafa);
+  background: var(--bg-surface-subtle);
   flex-shrink: 0;
 }
 
 .footer-stats-text {
   font-size: 0.85rem;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-muted);
 }
 
 .footer-stats-text strong {
-  color: var(--text-primary, #0f172a);
+  color: var(--text-main);
 }
 
 .footer-btn-group {
@@ -1041,13 +1027,13 @@ const handleExport = async () => {
 }
 
 .btn-primary {
-  background: #0f172a;
-  color: #ffffff;
-  border: 1px solid #0f172a;
+  background: var(--primary);
+  color: var(--primary-contrast) !important;
+  border: 1px solid var(--primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #1e293b;
+  opacity: 0.9;
 }
 
 .btn-primary:disabled {
@@ -1056,13 +1042,13 @@ const handleExport = async () => {
 }
 
 .btn-secondary {
-  background: transparent;
-  color: var(--text-primary, #334155);
-  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
 }
 
 .btn-secondary:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-surface-hover);
 }
 
 /* 425 / 375 及移动端小屏专属响应式适配 */

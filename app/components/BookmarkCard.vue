@@ -39,11 +39,14 @@
           />
         </div>
 
-        <span v-if="bookmark.isPinned" class="pinned-badge" title="已置顶" aria-label="已置顶">📌 置顶</span>
+        <span v-if="bookmark.isPinned" class="pinned-badge" title="已置顶" aria-label="已置顶">
+          <SvgIcon name="pin" size="11" />
+          <span>置顶</span>
+        </span>
 
         <!-- 文件夹标签 (带一键移出与移动按钮) -->
         <span v-if="bookmark.folder" class="card-folder-tag" :title="`所属分类：${bookmark.folder}`">
-          <svg class="svg-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+          <SvgIcon name="folder" size="11" />
           <span class="folder-tag-name" @click.stop="$emit('filter-folder', bookmark.folder)">{{ bookmark.folder }}</span>
           <button
             type="button"
@@ -66,19 +69,20 @@
     <div class="bm-sub-row">
       <a :href="bookmark.url" target="_blank" rel="noopener noreferrer" class="bm-url-link" :aria-label="`打开网址：${bookmark.url}`" @click.stop>
         <span>{{ bookmark.url }}</span>
-        <span style="font-size: 11px;">↗</span>
+        <SvgIcon name="external" size="10" />
       </a>
 
       <div class="bm-actions-group" @click.stop>
-        <!-- 移动端专属：快捷移入文件夹按钮 -->
+        <!-- 快捷分类按钮 (全端常驻，支持一键为书签归类或切换文件夹) -->
         <button
           type="button"
-          class="action-pill-btn btn-mobile-move-folder"
-          title="长按卡片或点击此将书签归入文件夹"
+          class="action-pill-btn btn-action-classify"
+          title="点击为书签分配或更改文件夹分类"
           aria-label="将此书签归入文件夹"
           @click.stop="$emit('open-mobile-folder-select', bookmark)"
         >
-          <span>📁 分类</span>
+          <SvgIcon name="folder" size="11" />
+          <span>分类</span>
         </button>
 
         <button
@@ -89,7 +93,8 @@
           :aria-label="bookmark.isPinned ? '取消置顶' : '置顶此书签'"
           @click.stop="$emit('toggle-pin', bookmark.id)"
         >
-          <span>📌 {{ bookmark.isPinned ? '取消置顶' : '置顶' }}</span>
+          <SvgIcon name="pin" size="11" />
+          <span>{{ bookmark.isPinned ? '取消置顶' : '置顶' }}</span>
         </button>
 
         <button
@@ -100,7 +105,8 @@
           aria-label="编辑总结内容"
           @click.stop="$emit('start-inline-edit', bookmark)"
         >
-          <span>✏️ 编辑</span>
+          <SvgIcon name="edit" size="11" />
+          <span>编辑</span>
         </button>
 
         <button
@@ -110,7 +116,8 @@
           aria-label="删除此书签"
           @click.stop="$emit('delete', bookmark.id)"
         >
-          <span>🗑️ 删除</span>
+          <SvgIcon name="trash" size="11" />
+          <span>删除</span>
         </button>
       </div>
     </div>
@@ -131,7 +138,7 @@
       <div class="inline-actions-row">
         <button type="button" class="btn-secondary btn-sm" aria-label="取消编辑" @click="$emit('cancel-inline-edit')">取消</button>
         <button type="button" class="btn-primary btn-sm" aria-label="保存编辑更改" @click="$emit('save-inline-edit', bookmark.id)">
-          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.check"></svg>
+          <SvgIcon name="check" size="14" />
           <span>保存更改</span>
         </button>
       </div>
@@ -161,15 +168,15 @@
 
       <div v-if="features" class="summary-features-box">
         <div class="features-heading">📕 核心功能说明</div>
-        <div class="features-content">{{ features }}</div>
+        <div class="features-content" v-html="formatInlineMd(features)"></div>
       </div>
 
       <div v-if="actions.length" class="summary-actions-box">
         <div class="actions-heading">🎯 待办行动指南</div>
         <div class="actions-list">
           <div v-for="(act, idx) in actions" :key="idx" class="action-item-row">
-            <span class="action-bullet">[ ]</span>
-            <span class="action-text">{{ act }}</span>
+            <span class="action-bullet">• [ ]</span>
+            <span class="action-text" v-html="formatInlineMd(act)"></span>
           </div>
         </div>
       </div>
@@ -183,6 +190,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import SvgIcon from './SvgIcon.vue'
 import { ICONS, type Bookmark } from '../pages/state'
 
 const props = withDefaults(
@@ -283,9 +291,28 @@ const actions = computed(() => {
   if (!match || !match[1]) return []
   return match[1]
     .split('\n')
-    .map(line => line.replace(/^[\s\*\-\•]*\[\s*\]\s*/, '').trim())
+    .map(line => {
+      return line
+        .replace(/^[\s\*\-\•]*\*{0,2}\[\s*\]\*{0,2}\s*/, '')
+        .replace(/^[\s\*\-\•]+\s*/, '')
+        .trim()
+    })
     .filter(Boolean)
 })
+
+const formatInlineMd = (textSource: string) => {
+  if (!textSource) return ''
+  let text = textSource
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  text = text.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>')
+  text = text.replace(/\n/g, '<br/>')
+  return text
+}
 
 const displayDate = computed(() => {
   if (!props.bookmark.createdAt) return ''
@@ -394,6 +421,7 @@ const displayDate = computed(() => {
   font-weight: 600;
   display: inline-flex;
   align-items: center;
+  gap: 0.25rem;
   flex-shrink: 0;
 }
 
@@ -526,9 +554,6 @@ const displayDate = computed(() => {
   border-color: var(--danger);
 }
 
-.btn-mobile-move-folder {
-  display: none;
-}
 
 .inline-edit-container {
   display: flex;
@@ -675,8 +700,20 @@ const displayDate = computed(() => {
 }
 
 .action-bullet {
-  font-family: monospace;
-  font-weight: 700;
+  color: var(--text-subtle);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.action-text {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.action-text :deep(strong),
+.features-content :deep(strong) {
+  font-weight: 600;
+  color: var(--text-main);
 }
 
 .bm-summary-empty {

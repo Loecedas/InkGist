@@ -521,6 +521,89 @@ earth 是一个提供全球实时气象数据的在线平台，用户可以通�
     assert.ok(payload.actionGuide.length === 2, '应成功提取 2 条待办行动指南')
   })
 
+  // 14. 多级文件夹：拖拽调序、嵌套移动与多级级联重命名与删除测试
+  await asyncTest('多级文件夹引擎：拖拽调序、嵌套移动与级联更新测试', async () => {
+    const testUserId = 'test_hierarchical_user_' + Date.now()
+    
+    // 1. 初始化文件夹列表
+    const initialFolders = [
+      { id: 'f1', user_id: testUserId, name: '工作', created_at: '2026-08-30' },
+      { id: 'f2', user_id: testUserId, name: '学习', created_at: '2026-08-30' },
+      { id: 'f3', user_id: testUserId, name: '项目A', created_at: '2026-08-30' }
+    ]
+    await dbFolders.batchInsert(initialFolders, testUserId)
+
+    // 2. 插入书签
+    const bm1 = {
+      id: 'bm_h1',
+      user_id: testUserId,
+      title: '项目A需求文档',
+      url: 'https://docs.inkgist.dev/spec',
+      folder: '项目A',
+      created_at: '2026-08-30'
+    }
+    await dbBookmarks.upsert(bm1)
+
+    // 3. 测试调序 (Reorder)
+    await dbFolders.reorder(['学习', '项目A', '工作'], testUserId)
+    const reorderedFolders = await dbFolders.findByUser(testUserId)
+    assert.equal(reorderedFolders[0].name, '学习', '首个分类应为 学习')
+    assert.equal(reorderedFolders[1].name, '项目A', '第二个分类应为 项目A')
+    assert.equal(reorderedFolders[2].name, '工作', '第三个分类应为 工作')
+
+    // 4. 测试嵌套重命名/移动 (将 项目A 移动到 工作 下变成 工作/项目A)
+    await dbFolders.rename('项目A', '工作/项目A', testUserId)
+    const movedFolders = await dbFolders.findByUser(testUserId)
+    assert.ok(movedFolders.some(f => f.name === '工作/项目A'), '应包含嵌套路径 工作/项目A')
+
+    const movedBm = await dbBookmarks.findByUserAndUrl(testUserId, 'https://docs.inkgist.dev/spec')
+    assert.equal(movedBm?.folder, '工作/项目A', '书签所属分类应自动级联更新为 工作/项目A')
+
+    // 5. 级联重命名父文件夹 (将 工作 改名为 事业) -> 工作/项目A 自动变为 事业/项目A
+    await dbFolders.rename('工作', '事业', testUserId)
+    const renamedBm = await dbBookmarks.findByUserAndUrl(testUserId, 'https://docs.inkgist.dev/spec')
+    assert.equal(renamedBm?.folder, '事业/项目A', '书签分类应级联变为 事业/项目A')
+
+    // 6. 级联删除 (删除 事业) -> 所有子分类和子书签关联清空
+    await dbFolders.delete('事业', testUserId)
+    const finalBm = await dbBookmarks.findByUserAndUrl(testUserId, 'https://docs.inkgist.dev/spec')
+    assert.equal(finalBm?.folder, undefined, '被删除分类下的书签 folder 应被自动置空')
+
+    // 清理
+    await dbBookmarks.delete('bm_h1', testUserId)
+    await dbFolders.delete('学习', testUserId)
+  })
+
+  // 15. 未分类书签统计与文件夹防重名/保留字测试
+  await asyncTest('未分类引擎与文件夹名称唯一性校验测试', async () => {
+    const testUserId = 'test_uncat_user_' + Date.now()
+
+    // 1. 插入两条未分类书签与一条分类书签
+    const bm1 = { id: 'u_bm1', user_id: testUserId, title: '未分类书签1', url: 'https://example.com/1', created_at: '2026-08-30' }
+    const bm2 = { id: 'u_bm2', user_id: testUserId, title: '未分类书签2', url: 'https://example.com/2', folder: '', created_at: '2026-08-30' }
+    const bm3 = { id: 'u_bm3', user_id: testUserId, title: '分类书签', url: 'https://example.com/3', folder: '前端工具', created_at: '2026-08-30' }
+
+    await dbBookmarks.batchUpsert([bm1, bm2, bm3], testUserId)
+
+    const allBms = await dbBookmarks.findByUser(testUserId)
+    const uncatBms = allBms.filter(b => !b.folder || b.folder.trim() === '' || b.folder === 'all' || b.folder === 'uncategorized')
+    assert.equal(uncatBms.length, 2, '未分类书签数量应精确为 2 条')
+
+    // 2. 文件夹唯一性插入防重测试
+    await dbFolders.insert({ id: 'f_test_1', user_id: testUserId, name: '前端工具', created_at: '2026-08-30' })
+    await dbFolders.insert({ id: 'f_test_2', user_id: testUserId, name: '前端工具', created_at: '2026-08-30' }) // 重复插入
+
+    const userFolders = await dbFolders.findByUser(testUserId)
+    const matchCount = userFolders.filter(f => f.name === '前端工具').length
+    assert.equal(matchCount, 1, '重复插入同名文件夹后，数据库中同名分类应保持唯一')
+
+    // 清理
+    await dbBookmarks.delete('u_bm1', testUserId)
+    await dbBookmarks.delete('u_bm2', testUserId)
+    await dbBookmarks.delete('u_bm3', testUserId)
+    await dbFolders.delete('前端工具', testUserId)
+  })
+
   console.log(`\n========================================`)
   console.log(`🎯 测试结果：${passed} 项通过, ${failed} 项失败`)
   console.log(`========================================\n`)

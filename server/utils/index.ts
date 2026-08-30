@@ -744,20 +744,21 @@ export const dbFolders = {
   },
   delete: async (name: string, userId: string, event?: H3Event): Promise<void> => {
     const d1 = getD1Database(event)
+    const prefix = name + '/%'
     if (d1) {
       await ensureD1Tables(d1)
       await d1.batch([
-        d1.prepare('DELETE FROM folders WHERE name = ? AND user_id = ?').bind(name, userId),
-        d1.prepare('UPDATE bookmarks SET folder = NULL WHERE folder = ? AND user_id = ?').bind(name, userId)
+        d1.prepare('DELETE FROM folders WHERE (name = ? OR name LIKE ?) AND user_id = ?').bind(name, prefix, userId),
+        d1.prepare('UPDATE bookmarks SET folder = NULL WHERE (folder = ? OR folder LIKE ?) AND user_id = ?').bind(name, prefix, userId)
       ])
       return
     }
     const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    writeJson(FOLDERS_FILE, folders.filter(f => !(f.name === name && f.user_id === userId)))
+    writeJson(FOLDERS_FILE, folders.filter(f => !(f.user_id === userId && (f.name === name || f.name.startsWith(name + '/')))))
     const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
     let changed = false
     bookmarks.forEach(b => {
-      if (b.user_id === userId && b.folder === name) {
+      if (b.user_id === userId && b.folder && (b.folder === name || b.folder.startsWith(name + '/'))) {
         b.folder = undefined
         changed = true
       }
@@ -768,29 +769,142 @@ export const dbFolders = {
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      await d1.batch([
+      const oldPrefix = oldName + '/%'
+      const { results: subFolders } = await d1.prepare('SELECT id, name FROM folders WHERE name LIKE ? AND user_id = ?').bind(oldPrefix, userId).all()
+      const { results: subBookmarks } = await d1.prepare('SELECT id, folder FROM bookmarks WHERE folder LIKE ? AND user_id = ?').bind(oldPrefix, userId).all()
+
+      const stmts: any[] = [
         d1.prepare('UPDATE folders SET name = ? WHERE name = ? AND user_id = ?').bind(newName, oldName, userId),
         d1.prepare('UPDATE bookmarks SET folder = ? WHERE folder = ? AND user_id = ?').bind(newName, oldName, userId)
-      ])
+      ]
+
+      if (Array.isArray(subFolders)) {
+        for (const sf of subFolders) {
+          const updated = newName + (sf.name as string).slice(oldName.length)
+          stmts.push(d1.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').bind(updated, sf.id, userId))
+        }
+      }
+      if (Array.isArray(subBookmarks)) {
+        for (const sb of subBookmarks) {
+          const updated = newName + (sb.folder as string).slice(oldName.length)
+          stmts.push(d1.prepare('UPDATE bookmarks SET folder = ? WHERE id = ? AND user_id = ?').bind(updated, sb.id, userId))
+        }
+      }
+
+      await d1.batch(stmts)
       return
     }
+
     const folders = readJson<FolderRow[]>(FOLDERS_FILE)
+    const now = new Date().toISOString()
     folders.forEach(f => {
-      if (f.user_id === userId && f.name === oldName) {
-        f.name = newName
+      if (f.user_id === userId) {
+        if (f.name === oldName) {
+          f.name = newName
+        } else if (f.name.startsWith(oldName + '/')) {
+          f.name = newName + f.name.slice(oldName.length)
+        }
       }
     })
+
+    // 确保新路径的祖先目录存在
+    if (newName.includes('/')) {
+      const parts = newName.split('/')
+      let cur = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        cur = cur ? `${cur}/${parts[i]}` : parts[i]
+        if (!folders.some(f => f.user_id === userId && f.name === cur)) {
+          folders.push({ id: 'f_' + randomUUID(), user_id: userId, name: cur, created_at: now })
+        }
+      }
+    }
     writeJson(FOLDERS_FILE, folders)
 
     const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
     let changed = false
     bookmarks.forEach(b => {
-      if (b.user_id === userId && b.folder === oldName) {
-        b.folder = newName
-        changed = true
+      if (b.user_id === userId && b.folder) {
+        if (b.folder === oldName) {
+          b.folder = newName
+          changed = true
+        } else if (b.folder.startsWith(oldName + '/')) {
+          b.folder = newName + b.folder.slice(oldName.length)
+          changed = true
+        }
       }
     })
     if (changed) writeJson(BOOKMARKS_FILE, bookmarks)
+  },
+  reorder: async (folderNames: string[], userId: string, event?: H3Event): Promise<void> => {
+    // 自动补齐所有文件夹名称的祖先目录，确保层级结构不丢失
+    const completeNames: string[] = []
+    const seen = new Set<string>()
+    for (const name of folderNames) {
+      if (name.includes('/')) {
+        const parts = name.split('/')
+        let cur = ''
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur = cur ? `${cur}/${parts[i]}` : parts[i]
+          if (!seen.has(cur)) {
+            seen.add(cur)
+            completeNames.push(cur)
+          }
+        }
+      }
+      if (!seen.has(name)) {
+        seen.add(name)
+        completeNames.push(name)
+      }
+    }
+
+    const d1 = getD1Database(event)
+    if (d1) {
+      await ensureD1Tables(d1)
+      const existing = await d1.prepare('SELECT * FROM folders WHERE user_id = ?').bind(userId).all()
+      const existingRows = (existing.results as FolderRow[]) || []
+      const map = new Map<string, FolderRow>()
+      for (const row of existingRows) {
+        map.set(row.name, row)
+      }
+      const stmts: any[] = [d1.prepare('DELETE FROM folders WHERE user_id = ?').bind(userId)]
+      const now = new Date().toISOString()
+      for (const name of completeNames) {
+        const row = map.get(name)
+        const id = row?.id || ('f_' + randomUUID())
+        const createdAt = row?.created_at || now
+        stmts.push(d1.prepare('INSERT INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, userId, name, createdAt))
+      }
+      for (let i = 0; i < stmts.length; i += 50) {
+        await d1.batch(stmts.slice(i, i + 50))
+      }
+      return
+    }
+
+    const allFolders = readJson<FolderRow[]>(FOLDERS_FILE)
+    const userFolders = allFolders.filter(f => f.user_id === userId)
+    const otherFolders = allFolders.filter(f => f.user_id !== userId)
+    const map = new Map<string, FolderRow>()
+    for (const f of userFolders) {
+      map.set(f.name, f)
+    }
+
+    const reordered: FolderRow[] = []
+    const now = new Date().toISOString()
+    for (const name of completeNames) {
+      const existing = map.get(name)
+      if (existing) {
+        reordered.push(existing)
+        map.delete(name)
+      } else {
+        reordered.push({ id: 'f_' + randomUUID(), user_id: userId, name, created_at: now })
+      }
+    }
+    // 补齐未在列表中的其它已有文件夹
+    for (const remaining of map.values()) {
+      reordered.push(remaining)
+    }
+
+    writeJson(FOLDERS_FILE, [...otherFolders, ...reordered])
   }
 }
 
@@ -1061,33 +1175,57 @@ export async function callLlmService(
   }
 ): Promise<LlmResponseResult | null> {
   const { userPromptText, systemPrompt } = options
-  let activeProvider: 'zhipu' | 'deepseek' | 'gemini' | 'custom' | null = null
+
+  // 构建可用模型优先级队列 (支持单点异常自动无缝降级到其他已配置模型)
+  const providersQueue: ('zhipu' | 'deepseek' | 'gemini' | 'custom')[] = []
 
   if (config.defaultProvider && config.defaultProvider !== 'auto') {
-    const p = config.defaultProvider.toLowerCase().trim()
-    if (p === 'zhipu' && config.zhipuApiKey) activeProvider = 'zhipu'
-    else if (p === 'deepseek' && config.deepseekApiKey) activeProvider = 'deepseek'
-    else if (p === 'gemini' && config.geminiApiKey) activeProvider = 'gemini'
-    else if (p === 'custom' && config.aiApiKey) activeProvider = 'custom'
+    const p = config.defaultProvider.toLowerCase().trim() as any
+    if (['zhipu', 'deepseek', 'gemini', 'custom'].includes(p)) {
+      providersQueue.push(p)
+    }
   }
 
-  if (!activeProvider) {
-    if (config.zhipuApiKey?.trim()) activeProvider = 'zhipu'
-    else if (config.deepseekApiKey?.trim()) activeProvider = 'deepseek'
-    else if (config.geminiApiKey?.trim()) activeProvider = 'gemini'
-    else if (config.aiApiKey?.trim()) activeProvider = 'custom'
-  }
+  // 补全其余已配置 API Key 的备选大模型
+  if (config.zhipuApiKey?.trim() && !providersQueue.includes('zhipu')) providersQueue.push('zhipu')
+  if (config.deepseekApiKey?.trim() && !providersQueue.includes('deepseek')) providersQueue.push('deepseek')
+  if (config.geminiApiKey?.trim() && !providersQueue.includes('gemini')) providersQueue.push('gemini')
+  if (config.aiApiKey?.trim() && !providersQueue.includes('custom')) providersQueue.push('custom')
 
-  if (!activeProvider) return null
+  for (const provider of providersQueue) {
+    // 1. 智谱 AI
+    if (provider === 'zhipu' && config.zhipuApiKey?.trim()) {
+      const apiKey = config.zhipuApiKey.trim()
+      const preferredModel = config.zhipuModel || 'glm-4.6v-flash'
+      const candidateModels = [preferredModel, 'glm-4-flash', 'glm-4v-flash'].filter((v, i, a) => a.indexOf(v) === i)
+      for (const model of candidateModels) {
+        try {
+          const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+            method: 'POST',
+            signal: AbortSignal.timeout(28000),
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPromptText }],
+              temperature: 0.3,
+              max_tokens: 2500
+            })
+          })
+          const data = await response.json()
+          const text = data?.choices?.[0]?.message?.content
+          if (text?.trim()) return { text: text.trim(), providerName: '智谱 AI', modelName: model }
+        } catch (err) {
+          console.warn(`智谱模型 [${model}] 调用异常，尝试备用模型:`, err)
+        }
+      }
+    }
 
-  // 1. 智谱 AI
-  if (activeProvider === 'zhipu') {
-    const apiKey = config.zhipuApiKey?.trim()
-    const preferredModel = config.zhipuModel || 'glm-4.6v-flash'
-    const candidateModels = [preferredModel, 'glm-4-flash', 'glm-4v-flash'].filter((v, i, a) => a.indexOf(v) === i)
-    for (const model of candidateModels) {
+    // 2. DeepSeek
+    if (provider === 'deepseek' && config.deepseekApiKey?.trim()) {
+      const apiKey = config.deepseekApiKey.trim()
+      const model = config.deepseekModel || 'deepseek-chat'
       try {
-        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           signal: AbortSignal.timeout(28000),
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -1095,97 +1233,73 @@ export async function callLlmService(
             model,
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPromptText }],
             temperature: 0.3,
-            max_tokens: 1500
+            max_tokens: 2500
           })
         })
         const data = await response.json()
         const text = data?.choices?.[0]?.message?.content
-        if (text?.trim()) return { text: text.trim(), providerName: '智谱 AI', modelName: model }
+        if (text?.trim()) return { text: text.trim(), providerName: 'DeepSeek', modelName: model }
       } catch (err) {
-        console.warn(`智谱模型 [${model}] 异常:`, err)
+        console.warn(`DeepSeek 调用异常，尝试降级到备用大模型:`, err)
       }
     }
-  }
 
-  // 2. DeepSeek
-  if (activeProvider === 'deepseek') {
-    const apiKey = config.deepseekApiKey?.trim()
-    const model = config.deepseekModel || 'deepseek-chat'
-    try {
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        signal: AbortSignal.timeout(28000),
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPromptText }],
-          temperature: 0.3,
-          max_tokens: 1500
+    // 3. Google Gemini
+    if (provider === 'gemini' && config.geminiApiKey?.trim()) {
+      const apiKey = config.geminiApiKey.trim()
+      const model = config.geminiModel || 'gemini-2.0-flash'
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+        const response = await fetch(url, {
+          method: 'POST',
+          signal: AbortSignal.timeout(28000),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ parts: [{ text: userPromptText }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 2500 }
+          })
         })
-      })
-      const data = await response.json()
-      const text = data?.choices?.[0]?.message?.content
-      if (text?.trim()) return { text: text.trim(), providerName: 'DeepSeek', modelName: model }
-    } catch (err) {
-      console.warn(`DeepSeek 调用异常:`, err)
-    }
-  }
-
-  // 3. Google Gemini
-  if (activeProvider === 'gemini') {
-    const apiKey = config.geminiApiKey?.trim()
-    const model = config.geminiModel || 'gemini-2.0-flash'
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-      const response = await fetch(url, {
-        method: 'POST',
-        signal: AbortSignal.timeout(28000),
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ parts: [{ text: userPromptText }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1500 }
-        })
-      })
-      const data = await response.json()
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
-      if (text?.trim()) return { text: text.trim(), providerName: 'Google Gemini', modelName: model }
-    } catch (err) {
-      console.warn(`Gemini 调用异常:`, err)
-    }
-  }
-
-  // 4. 自定义兼容模型
-  if (activeProvider === 'custom') {
-    const baseUrl = (config.aiBaseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '')
-    const apiKey = config.aiApiKey?.trim() || ''
-    const model = config.aiModel?.trim() || 'gpt-4o-mini'
-    const targetUrl = baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl}/chat/completions`
-    try {
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        signal: AbortSignal.timeout(28000),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPromptText }
-          ],
-          temperature: 0.3,
-          max_tokens: 1500
-        })
-      })
-      if (response.ok) {
         const data = await response.json()
-        const text = data?.choices?.[0]?.message?.content
-        if (text?.trim()) return { text: text.trim(), providerName: '自定义大模型', modelName: model }
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
+        if (text?.trim()) return { text: text.trim(), providerName: 'Google Gemini', modelName: model }
+      } catch (err) {
+        console.warn(`Gemini 调用异常，尝试降级到备用大模型:`, err)
       }
-    } catch (err) {
-      console.warn(`自定义模型 [${model}] 调用异常:`, err)
+    }
+
+    // 4. 自定义兼容模型
+    if (provider === 'custom' && config.aiApiKey?.trim()) {
+      const baseUrl = (config.aiBaseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '')
+      const apiKey = config.aiApiKey.trim()
+      const model = config.aiModel?.trim() || 'gpt-4o-mini'
+      const targetUrl = baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl}/chat/completions`
+      try {
+        const response = await fetch(targetUrl, {
+          method: 'POST',
+          signal: AbortSignal.timeout(28000),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPromptText }
+            ],
+            temperature: 0.3,
+            max_tokens: 2500
+          })
+        })
+        if (response.ok) {
+          const data = await response.json()
+          const text = data?.choices?.[0]?.message?.content
+          if (text?.trim()) return { text: text.trim(), providerName: '自定义大模型', modelName: model }
+        }
+      } catch (err) {
+        console.warn(`自定义模型 [${model}] 调用异常:`, err)
+      }
     }
   }
 

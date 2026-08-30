@@ -2,7 +2,7 @@
   <div v-if="isOpen" class="rename-folder-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="rename-dialog-title" @click.self="$emit('close')">
     <div class="rename-folder-dialog">
       <div class="dialog-title">
-        <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.edit"></svg>
+        <SvgIcon name="edit" size="16" />
         <span id="rename-dialog-title">重命名文件夹</span>
       </div>
       <p class="dialog-sub">原名称：<strong>{{ folderName }}</strong></p>
@@ -12,11 +12,15 @@
         v-model="newName"
         type="text"
         class="rename-input"
+        :class="{ 'is-invalid': isDuplicate || isReserved }"
         placeholder="请输入新的文件夹名称..."
         aria-label="新的文件夹名称"
         @keydown.enter="handleConfirm"
         @keydown.esc="$emit('close')"
       />
+
+      <p v-if="isDuplicate" class="error-tip-text">已存在名为此名称的文件夹，不能重复</p>
+      <p v-else-if="isReserved" class="error-tip-text">不能使用系统保留字作为文件夹名称</p>
 
       <div class="dialog-actions">
         <button type="button" class="btn-secondary btn-sm" aria-label="取消重命名" @click="$emit('close')">取消</button>
@@ -24,10 +28,10 @@
           type="button"
           class="btn-primary btn-sm"
           aria-label="确认重命名"
-          :disabled="!newName.trim() || newName.trim() === folderName"
+          :disabled="!newName.trim() || newName.trim() === folderName || isDuplicate || isReserved"
           @click="handleConfirm"
         >
-          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.check"></svg>
+          <SvgIcon name="check" size="14" />
           <span>确认重命名</span>
         </button>
       </div>
@@ -36,12 +40,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import { ICONS } from '../pages/state'
+import { ref, computed, watch, nextTick } from 'vue'
+import SvgIcon from './SvgIcon.vue'
+import { ICONS, type BookmarkFolder } from '../pages/state'
 
 const props = defineProps<{
   isOpen: boolean
   folderName: string
+  folders?: BookmarkFolder[]
 }>()
 
 const emit = defineEmits<{
@@ -51,6 +57,18 @@ const emit = defineEmits<{
 
 const newName = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+
+const isReserved = computed(() => {
+  const t = newName.value.trim().toLowerCase()
+  return t === 'all' || t === 'uncategorized' || t === '全部' || t === '未分类'
+})
+
+const isDuplicate = computed(() => {
+  const t = newName.value.trim().toLowerCase()
+  if (!t || t === props.folderName.toLowerCase()) return false
+  if (!props.folders) return false
+  return props.folders.some(f => f.name.toLowerCase() === t && f.name.toLowerCase() !== props.folderName.toLowerCase())
+})
 
 watch(
   () => props.isOpen,
@@ -74,8 +92,9 @@ watch(
 )
 
 const handleConfirm = () => {
-  if (!newName.value.trim() || newName.value.trim() === props.folderName) return
-  emit('submit', newName.value.trim())
+  const t = newName.value.trim()
+  if (!t || t === props.folderName || isDuplicate.value || isReserved.value) return
+  emit('submit', t)
 }
 </script>
 
@@ -138,9 +157,14 @@ const handleConfirm = () => {
   color: var(--text-main);
   outline: none;
 }
-.rename-input:focus {
-  border-color: var(--primary);
-  background-color: var(--bg-surface);
+.rename-input.is-invalid {
+  border-color: var(--danger);
+}
+
+.error-tip-text {
+  font-size: 0.75rem;
+  color: var(--danger);
+  margin: -0.25rem 0 0.25rem 0.25rem;
 }
 
 .dialog-actions {

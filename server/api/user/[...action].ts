@@ -105,7 +105,7 @@ export default defineEventHandler(async (event) => {
       const body = await readBody(event)
       if (!body?.name?.trim()) throw createError({ statusCode: 400, statusMessage: '分类名称不能为空' })
       const folderName = body.name.trim()
-      if (folderName.length > 20) throw createError({ statusCode: 400, statusMessage: '分类名称不能超过 20 个字符' })
+      if (folderName.length > 50) throw createError({ statusCode: 400, statusMessage: '分类名称不能超过 50 个字符' })
 
       const folderId = 'f_' + randomUUID()
       const createdAt = new Date().toISOString()
@@ -138,11 +138,25 @@ export default defineEventHandler(async (event) => {
       if (!oldName?.trim() || !newName?.trim()) {
         throw createError({ statusCode: 400, statusMessage: '原文件夹名称与新名称不能为空' })
       }
-      if (newName.trim().length > 20) {
-        throw createError({ statusCode: 400, statusMessage: '新分类名称不能超过 20 个字符' })
+      if (newName.trim().length > 50) {
+        throw createError({ statusCode: 400, statusMessage: '新分类名称不能超过 50 个字符' })
       }
       await dbFolders.rename(oldName.trim(), newName.trim(), user.id, event)
       return { success: true, message: '分类文件夹已重命名' }
+    }
+  }
+
+  // 2.1 分类文件夹重新排序 /api/user/folders/reorder
+  if (action === 'folders/reorder') {
+    if (method === 'POST' || method === 'PUT') {
+      const body = await readBody(event)
+      const names = Array.isArray(body) ? body : (body?.folders || body?.names || [])
+      if (!Array.isArray(names)) {
+        throw createError({ statusCode: 400, statusMessage: '文件夹列表格式错误' })
+      }
+      const cleanNames = names.map((n: any) => typeof n === 'string' ? n.trim() : (n?.name ? String(n.name).trim() : '')).filter(Boolean)
+      await dbFolders.reorder(cleanNames, user.id, event)
+      return { success: true, message: '分类排序已保存' }
     }
   }
 

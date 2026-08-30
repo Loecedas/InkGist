@@ -330,6 +330,9 @@ if (typeof window !== 'undefined') {
   } catch {}
 }
 
+const STORAGE_KEY_ACTIVE_FOLDER = 'inkgist_active_folder_v2'
+const STORAGE_KEY_SORT = 'inkgist_sort_option_v1'
+
 const bookmarks = ref<Bookmark[]>([])
 const folders = ref<BookmarkFolder[]>([])
 const activeFolder = ref<string>('all')
@@ -337,6 +340,59 @@ const columns = ref<GridColumns>(initialColumns)
 const searchQuery = ref('')
 const currentSort = ref<SortOption>('time-desc')
 const isLoaded = ref(false)
+
+// 保证所有文件夹、祖先目录和子目录均规范化保留，并自动清理已移入子目录的残留顶级孤立记录
+const normalizeFolderList = (list: BookmarkFolder[], bms: Bookmark[]): BookmarkFolder[] => {
+  const result: BookmarkFolder[] = []
+  const seen = new Set<string>()
+
+  // 1. 过滤掉已经移入子文件夹、且在顶级已无直属书签的孤立顶级文件夹
+  const bmFolders = new Set(bms.map(b => b.folder).filter(Boolean) as string[])
+  const cleanList = list.filter(f => {
+    if (!f.name.includes('/')) {
+      const hasDeeperVariant = list.some(other => other.name !== f.name && other.name.endsWith('/' + f.name))
+      const hasDirectBm = bmFolders.has(f.name)
+      if (hasDeeperVariant && !hasDirectBm) {
+        return false // 已被放入其它文件夹成为子文件夹，清除孤立的顶级记录
+      }
+    }
+    return true
+  })
+
+  const addName = (name: string, id?: string) => {
+    const trimmed = (name || '').trim()
+    if (!trimmed || seen.has(trimmed)) return
+    seen.add(trimmed)
+    result.push({ id: id || ('folder_' + trimmed), name: trimmed })
+  }
+
+  // 2. 先按用户既有顺序保留并确保祖先目录在前端
+  for (const f of cleanList) {
+    if (f.name.includes('/')) {
+      const parts = f.name.split('/')
+      let cur = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        cur = cur ? `${cur}/${parts[i]}` : parts[i]
+        addName(cur)
+      }
+    }
+    addName(f.name, f.id)
+  }
+
+  // 3. 补齐书签包含的分类及其祖先路径
+  for (const b of bms) {
+    if (b.folder) {
+      const parts = b.folder.split('/')
+      let cur = ''
+      for (const p of parts) {
+        cur = cur ? `${cur}/${p}` : p
+        addName(cur)
+      }
+    }
+  }
+
+  return result
+}
 
 export const useBookmarks = () => {
   const { isLoggedIn, currentUser, fetchCurrentUser } = useAuth()
@@ -372,6 +428,26 @@ export const useBookmarks = () => {
     } catch {}
   }
 
+  const restoreSettingsFromStorage = () => {
+    restoreColumnsFromStorage()
+    if (typeof window === 'undefined') return
+    try {
+      // 记忆并恢复选中的文件夹 (Active Folder)
+      const afKey = getUserStorageKey(STORAGE_KEY_ACTIVE_FOLDER)
+      const savedActive = localStorage.getItem(afKey) || localStorage.getItem(STORAGE_KEY_ACTIVE_FOLDER)
+      if (savedActive) {
+        activeFolder.value = savedActive
+      }
+
+      // 记忆并恢复排序偏好 (Sort Option)
+      const sKey = getUserStorageKey(STORAGE_KEY_SORT)
+      const savedSort = (localStorage.getItem(sKey) || localStorage.getItem(STORAGE_KEY_SORT)) as SortOption
+      if (savedSort && ['time-desc', 'time-asc', 'name-asc'].includes(savedSort)) {
+        currentSort.value = savedSort
+      }
+    } catch {}
+  }
+
   const saveToStorage = () => {
     if (typeof window === 'undefined') return
     try {
@@ -394,7 +470,7 @@ export const useBookmarks = () => {
   }
 
   const loadFromBackend = async () => {
-    restoreColumnsFromStorage()
+    restoreSettingsFromStorage()
     try {
       const headers = getAuthHeaders()
       const [bmRes, fdRes] = await Promise.all([
@@ -405,21 +481,27 @@ export const useBookmarks = () => {
         bookmarks.value = deduplicateBookmarks(bmRes.bookmarks)
         saveToStorage()
       }
-      if (fdRes && fdRes.folders) {
-        folders.value = fdRes.folders
-      }
-      // 自动从所有书签中提取并补全分类文件夹
-      for (const b of bookmarks.value) {
-        if (b.folder && !folders.value.some(f => f.name === b.folder)) {
-          folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: b.folder })
+
+      const fKey = getUserStorageKey(STORAGE_KEY_FOLDERS)
+      let savedLocalFolders: BookmarkFolder[] = []
+      try {
+        const localRaw = localStorage.getItem(fKey)
+        if (localRaw) savedLocalFolders = JSON.parse(localRaw)
+      } catch {}
+
+      // 以本地保存的自定义排序与排布为基准，合并远程文件夹
+      const baseList = savedLocalFolders.length > 0 ? [...savedLocalFolders] : (fdRes?.folders || [])
+      for (const rf of (fdRes?.folders || [])) {
+        if (!baseList.some(bf => bf.name === rf.name)) {
+          baseList.push(rf)
         }
       }
-      folders.value = [...folders.value]
+      folders.value = normalizeFolderList(baseList, bookmarks.value)
       saveFoldersToStorage()
     } catch {
       loadFromStorage()
     } finally {
-      restoreColumnsFromStorage()
+      restoreSettingsFromStorage()
       isLoaded.value = true
     }
   }
@@ -434,19 +516,11 @@ export const useBookmarks = () => {
 
       const fKey = getUserStorageKey(STORAGE_KEY_FOLDERS)
       const savedFolders = localStorage.getItem(fKey) || (!currentUser.value ? localStorage.getItem(STORAGE_KEY_FOLDERS) : null)
-      if (savedFolders) folders.value = JSON.parse(savedFolders)
-      else folders.value = []
-
-      // 自动从所有书签中提取并补全分类文件夹
-      for (const b of bookmarks.value) {
-        if (b.folder && !folders.value.some(f => f.name === b.folder)) {
-          folders.value.push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: b.folder })
-        }
-      }
-      folders.value = [...folders.value]
+      const rawFolders: BookmarkFolder[] = savedFolders ? JSON.parse(savedFolders) : []
+      folders.value = normalizeFolderList(rawFolders, bookmarks.value)
       saveFoldersToStorage()
 
-      restoreColumnsFromStorage()
+      restoreSettingsFromStorage()
     } catch (e) {
       console.error('Failed to load bookmarks or folders', e)
     } finally {
@@ -455,17 +529,31 @@ export const useBookmarks = () => {
   }
 
   const initData = async () => {
-    restoreColumnsFromStorage()
+    restoreSettingsFromStorage()
     await fetchCurrentUser()
     if (isLoggedIn.value) {
       await loadFromBackend()
     } else {
       loadFromStorage()
     }
-    restoreColumnsFromStorage()
+    restoreSettingsFromStorage()
   }
 
   if (typeof window !== 'undefined') {
+    // 监听选中的文件夹变动并即时持久化
+    watch(activeFolder, (newVal) => {
+      try {
+        localStorage.setItem(getUserStorageKey(STORAGE_KEY_ACTIVE_FOLDER), newVal)
+      } catch {}
+    })
+
+    // 监听排序偏好变动并即时持久化
+    watch(currentSort, (newVal) => {
+      try {
+        localStorage.setItem(getUserStorageKey(STORAGE_KEY_SORT), newVal)
+      } catch {}
+    })
+
     watch(currentUser, (newUser, oldUser) => {
       if (newUser?.id !== oldUser?.id) {
         bookmarks.value = []
@@ -480,7 +568,8 @@ export const useBookmarks = () => {
       const currentBmKey = getUserStorageKey(STORAGE_KEY_BOOKMARKS)
       const currentFdKey = getUserStorageKey(STORAGE_KEY_FOLDERS)
       const currentColKey = getUserStorageKey(STORAGE_KEY_COLUMNS)
-      if (e.key === currentBmKey || e.key === currentFdKey || e.key === currentColKey || e.key === STORAGE_KEY_COLUMNS) {
+      const currentAfKey = getUserStorageKey(STORAGE_KEY_ACTIVE_FOLDER)
+      if (e.key === currentBmKey || e.key === currentFdKey || e.key === currentColKey || e.key === STORAGE_KEY_COLUMNS || e.key === currentAfKey) {
         if (!isLoggedIn.value) {
           loadFromStorage()
         } else {
@@ -493,9 +582,16 @@ export const useBookmarks = () => {
     })
   }
 
-  const addFolder = async (name: string) => {
+  const addFolder = async (name: string): Promise<boolean> => {
     const trimmed = name.trim()
-    if (!trimmed || folders.value.some(f => f.name === trimmed)) return
+    if (!trimmed) return false
+    const lower = trimmed.toLowerCase()
+    if (lower === 'all' || lower === 'uncategorized' || trimmed === '全部' || trimmed === '未分类') {
+      return false
+    }
+    if (folders.value.some(f => f.name.toLowerCase() === lower)) {
+      return false
+    }
     const newF: BookmarkFolder = { id: 'f_' + Date.now(), name: trimmed }
     folders.value.push(newF)
     folders.value = [...folders.value]
@@ -509,20 +605,142 @@ export const useBookmarks = () => {
         })
       } catch (e) {}
     }
+    return true
   }
 
-  const renameFolder = async (oldName: string, newName: string) => {
+  const reorderFolders = async (newFolders: BookmarkFolder[]) => {
+    folders.value = normalizeFolderList(newFolders, bookmarks.value)
+    saveFoldersToStorage()
+    if (isLoggedIn.value) {
+      try {
+        await $fetch('/api/user/folders/reorder', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: { folders: folders.value.map(f => f.name) }
+        })
+      } catch (e) {
+        console.error('Failed to sync folder reorder to server', e)
+      }
+    }
+  }
+
+  const moveFolder = async (folderToMove: string, targetParentFolder: string | null) => {
+    const src = (folderToMove || '').trim()
+    const targetParent = targetParentFolder ? targetParentFolder.trim() : null
+
+    // 1. 防循环嵌套与无效移动保护
+    if (!src) return false
+    if (targetParent === src) return false
+    if (targetParent && (targetParent.startsWith(src + '/') || targetParent === src)) {
+      return false
+    }
+
+    const baseName = src.split('/').pop() || src
+    const newFolderPath = targetParent ? `${targetParent}/${baseName}` : baseName
+    if (newFolderPath === src) return false
+
+    // 2. 级联重构 folders 列表
+    const updatedFolders: BookmarkFolder[] = []
+    const seenNames = new Set<string>()
+
+    // 确保目标父文件夹在列表中
+    if (targetParent && !folders.value.some(f => f.name === targetParent)) {
+      updatedFolders.push({ id: 'f_' + Date.now() + '_p', name: targetParent })
+      seenNames.add(targetParent)
+    }
+
+    for (const f of folders.value) {
+      let nextName = f.name
+      if (f.name === src) {
+        nextName = newFolderPath
+      } else if (f.name.startsWith(src + '/')) {
+        nextName = newFolderPath + f.name.slice(src.length)
+      }
+      if (!seenNames.has(nextName)) {
+        seenNames.add(nextName)
+        updatedFolders.push({ ...f, name: nextName })
+      }
+    }
+
+    if (!seenNames.has(newFolderPath)) {
+      updatedFolders.push({ id: 'f_' + Date.now() + '_mv', name: newFolderPath })
+      seenNames.add(newFolderPath)
+    }
+
+    // 3. 级联更新书签关联
+    bookmarks.value.forEach(b => {
+      if (b.folder === src) {
+        b.folder = newFolderPath
+      } else if (b.folder && b.folder.startsWith(src + '/')) {
+        b.folder = newFolderPath + b.folder.slice(src.length)
+      }
+    })
+
+    // 4. 更新激活文件夹状态
+    if (activeFolder.value === src) {
+      activeFolder.value = newFolderPath
+    } else if (activeFolder.value.startsWith(src + '/')) {
+      activeFolder.value = newFolderPath + activeFolder.value.slice(src.length)
+    }
+
+    bookmarks.value = [...bookmarks.value]
+    folders.value = normalizeFolderList(updatedFolders, bookmarks.value)
+    saveToStorage()
+    saveFoldersToStorage()
+
+    // 5. 服务端同步
+    if (isLoggedIn.value) {
+      try {
+        const headers = getAuthHeaders()
+        await $fetch('/api/user/folders', {
+          method: 'PUT',
+          headers,
+          body: { oldName: src, newName: newFolderPath }
+        })
+        await $fetch('/api/user/folders/reorder', {
+          method: 'POST',
+          headers,
+          body: { folders: folders.value.map(f => f.name) }
+        })
+      } catch (e) {
+        console.error('Failed to sync folder move to server', e)
+      }
+    }
+
+    return true
+  }
+
+  const renameFolder = async (oldName: string, newName: string): Promise<boolean> => {
     const trimmed = newName.trim()
-    if (!trimmed || trimmed === oldName) return
-    if (folders.value.some(f => f.name === trimmed)) return
+    if (!trimmed || trimmed === oldName) return false
+    const lower = trimmed.toLowerCase()
+    if (lower === 'all' || lower === 'uncategorized' || trimmed === '全部' || trimmed === '未分类') {
+      return false
+    }
+    if (folders.value.some(f => f.name.toLowerCase() === lower && f.name !== oldName)) {
+      return false
+    }
 
-    const target = folders.value.find(f => f.name === oldName)
-    if (target) target.name = trimmed
+    folders.value.forEach(f => {
+      if (f.name === oldName) {
+        f.name = trimmed
+      } else if (f.name.startsWith(oldName + '/')) {
+        f.name = trimmed + f.name.slice(oldName.length)
+      }
+    })
 
-    if (activeFolder.value === oldName) activeFolder.value = trimmed
+    if (activeFolder.value === oldName) {
+      activeFolder.value = trimmed
+    } else if (activeFolder.value.startsWith(oldName + '/')) {
+      activeFolder.value = trimmed + activeFolder.value.slice(oldName.length)
+    }
 
     bookmarks.value.forEach(b => {
-      if (b.folder === oldName) b.folder = trimmed
+      if (b.folder === oldName) {
+        b.folder = trimmed
+      } else if (b.folder && b.folder.startsWith(oldName + '/')) {
+        b.folder = trimmed + b.folder.slice(oldName.length)
+      }
     })
 
     bookmarks.value = [...bookmarks.value]
@@ -539,12 +757,19 @@ export const useBookmarks = () => {
         })
       } catch (e) {}
     }
+    return true
   }
 
   const deleteFolder = async (folderName: string) => {
-    folders.value = folders.value.filter(f => f.name !== folderName)
-    if (activeFolder.value === folderName) activeFolder.value = 'all'
-    bookmarks.value.forEach(b => { if (b.folder === folderName) b.folder = undefined })
+    folders.value = folders.value.filter(f => !(f.name === folderName || f.name.startsWith(folderName + '/')))
+    if (activeFolder.value === folderName || activeFolder.value.startsWith(folderName + '/')) {
+      activeFolder.value = 'all'
+    }
+    bookmarks.value.forEach(b => {
+      if (b.folder && (b.folder === folderName || b.folder.startsWith(folderName + '/'))) {
+        b.folder = undefined
+      }
+    })
     bookmarks.value = [...bookmarks.value]
     folders.value = [...folders.value]
     saveToStorage()
@@ -566,7 +791,8 @@ export const useBookmarks = () => {
   const assignBookmarkToFolder = async (bookmarkId: string, folderName: string) => {
     const target = bookmarks.value.find(b => b.id === bookmarkId)
     if (target) {
-      target.folder = folderName === 'none' || folderName === 'all' ? undefined : folderName
+      const isRootOrUncat = folderName === 'none' || folderName === 'all' || folderName === 'uncategorized' || folderName === '全部' || folderName === '未分类'
+      target.folder = isRootOrUncat ? undefined : folderName
       bookmarks.value = [...bookmarks.value]
       saveToStorage()
       if (isLoggedIn.value) {
@@ -599,11 +825,26 @@ export const useBookmarks = () => {
     }
   }
 
-  const getBookmarksInFolder = (folderName: string) => bookmarks.value.filter(b => b.folder === folderName)
+  const uncategorizedBookmarks = computed(() => {
+    return deduplicateBookmarks(bookmarks.value).filter(b => !b.folder || b.folder.trim() === '' || b.folder === 'all' || b.folder === 'uncategorized' || b.folder === '未分类')
+  })
+
+  const getBookmarksInFolder = (folderName: string, includeSubfolders = true) => {
+    if (folderName === 'all') return bookmarks.value
+    if (folderName === 'uncategorized' || folderName === '未分类') {
+      return bookmarks.value.filter(b => !b.folder || b.folder.trim() === '' || b.folder === 'all' || b.folder === 'uncategorized' || b.folder === '未分类')
+    }
+    if (includeSubfolders) {
+      return bookmarks.value.filter(b => b.folder === folderName || (b.folder && b.folder.startsWith(folderName + '/')))
+    }
+    return bookmarks.value.filter(b => b.folder === folderName)
+  }
 
   const filteredAndSortedBookmarks = computed(() => {
     let result = deduplicateBookmarks(bookmarks.value)
-    if (activeFolder.value !== 'all') {
+    if (activeFolder.value === 'uncategorized' || activeFolder.value === '未分类') {
+      result = result.filter(b => !b.folder || b.folder.trim() === '' || b.folder === 'all' || b.folder === 'uncategorized' || b.folder === '未分类')
+    } else if (activeFolder.value !== 'all') {
       result = result.filter(b => b.folder === activeFolder.value)
     }
     if (searchQuery.value.trim()) {
@@ -881,6 +1122,34 @@ export const useBookmarks = () => {
     }
   }
 
+  const getFolderBaseName = (name: string) => {
+    if (!name) return ''
+    const parts = name.split('/')
+    return parts[parts.length - 1]
+  }
+
+  const getDirectSubfolders = (parentName: string) => {
+    if (!parentName) return []
+    const prefix = parentName + '/'
+    return folders.value.filter(f => {
+      if (!f.name.startsWith(prefix)) return false
+      const remainder = f.name.slice(prefix.length)
+      return remainder.length > 0 && !remainder.includes('/')
+    })
+  }
+
+  const getFolderBookmarks = (folderName: string, recursive: boolean = true) => {
+    if (!folderName || folderName === 'all') return bookmarks.value
+    if (folderName === 'uncategorized' || folderName === '未分类') {
+      return bookmarks.value.filter(b => !b.folder || b.folder.trim() === '' || b.folder === 'all' || b.folder === 'uncategorized' || b.folder === '未分类')
+    }
+    if (!recursive) {
+      return bookmarks.value.filter(b => b.folder === folderName)
+    }
+    const prefix = folderName + '/'
+    return bookmarks.value.filter(b => b.folder === folderName || (b.folder && b.folder.startsWith(prefix)))
+  }
+
   onMounted(() => { if (!isLoaded.value) initData() })
   if (typeof window !== 'undefined' && !isLoaded.value) initData()
 
@@ -892,14 +1161,20 @@ export const useBookmarks = () => {
     searchQuery,
     currentSort,
     filteredAndSortedBookmarks,
+    uncategorizedBookmarks,
     isLoaded,
     loadFromBackend,
     addFolder,
     renameFolder,
     deleteFolder,
+    reorderFolders,
+    moveFolder,
     assignBookmarkToFolder,
     removeBookmarkFromFolder,
     getBookmarksInFolder,
+    getFolderBaseName,
+    getDirectSubfolders,
+    getFolderBookmarks,
     setColumns,
     addBookmark,
     importBookmarksBatch,
@@ -1056,6 +1331,8 @@ export const ICONS: Record<string, string> = {
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
   checkSquare: '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="m9 12 2 2 4-4"></path>',
   arrowRight: '<path d="m9 18 6-6-6-6"></path>',
-  alert: '<circle cx="12" cy="12" r="10"></line><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>',
+  arrowUp: '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>',
+  cornerUpLeft: '<polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>',
+  alert: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>',
   github: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>'
 }
