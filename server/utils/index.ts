@@ -1016,37 +1016,67 @@ export async function scrapeWebPage(targetUrl: string, jinaApiKey?: string): Pro
   }
 
   const normalizedUrl = urlCheck.cleanUrl
+  let nativeRes: { title: string; content: string; description: string; keywords?: string; siteName: string } | null = null
 
+  // 1. 原生高速离线清洗抓取
   try {
     const res = await fetchWithNativeExtractor(normalizedUrl)
-    if (res && res.content.trim().length > 40) {
-      return {
-        title: res.title || normalizedUrl,
-        content: res.content,
-        description: res.description,
-        siteName: res.siteName,
-        fetchMethod: 'defuddle',
-        antiCrawlDetected: false
+    if (res) {
+      nativeRes = res
+      // 如果原生抓取拿到了足够充实的正文（>80 字符），直接采用本地高速结果
+      if (res.content.trim().length > 80) {
+        return {
+          title: res.title || normalizedUrl,
+          content: res.content,
+          description: res.description,
+          siteName: res.siteName,
+          fetchMethod: 'defuddle',
+          antiCrawlDetected: false
+        }
       }
     }
   } catch (err: any) {
     // Native extractor fallback
   }
 
+  // 2. 若原生正文较短（如单页应用 SPA、音视频站、或动态渲染页面），尝试使用 Jina Reader 渲染
   try {
-    const res = await fetchWithJina(normalizedUrl, jinaApiKey)
-    if (res && res.content.trim().length > 30) {
-      const antiPatterns = [/just a moment/i, /cloudflare/i, /captcha/i, /access denied/i, /403 forbidden/i]
-      const isAnti = antiPatterns.some(p => p.test(res.content.slice(0, 500)))
-      return {
-        title: res.title || normalizedUrl,
-        content: res.content,
-        fetchMethod: 'jina',
-        antiCrawlDetected: isAnti
+    const jinaRes = await fetchWithJina(normalizedUrl, jinaApiKey)
+    if (jinaRes && jinaRes.content.trim().length > 30) {
+      const antiPatterns = [/just a moment/i, /cloudflare/i, /captcha/i, /access denied/i, /403 forbidden/i, /please enable cookies/i]
+      const isAnti = antiPatterns.some(p => p.test(jinaRes.content.slice(0, 500)))
+      if (!isAnti) {
+        return {
+          title: jinaRes.title || nativeRes?.title || normalizedUrl,
+          content: jinaRes.content,
+          description: nativeRes?.description,
+          siteName: nativeRes?.siteName,
+          fetchMethod: 'jina',
+          antiCrawlDetected: false
+        }
       }
     }
   } catch (err: any) {
     // Jina fallback handled
+  }
+
+  // 3. 🌟 核心保底兜底：若 Jina 超时/被拦截/限频，坚决不丢弃原生提取到的 title、description 与关键词元数据
+  if (nativeRes && (nativeRes.title || nativeRes.description || nativeRes.keywords || nativeRes.content.trim())) {
+    const metaParts: string[] = []
+    if (nativeRes.title && nativeRes.title !== normalizedUrl) metaParts.push(`【网页标题】：${nativeRes.title}`)
+    if (nativeRes.description) metaParts.push(`【网页摘要描述】：${nativeRes.description}`)
+    if (nativeRes.keywords) metaParts.push(`【网站关键词/标签】：${nativeRes.keywords}`)
+    if (nativeRes.content.trim()) metaParts.push(`【页面提取文本】：\n${nativeRes.content.trim()}`)
+
+    const fallbackContent = metaParts.join('\n\n')
+    return {
+      title: nativeRes.title || normalizedUrl,
+      content: fallbackContent || nativeRes.content || nativeRes.title,
+      description: nativeRes.description,
+      siteName: nativeRes.siteName,
+      fetchMethod: 'defuddle',
+      antiCrawlDetected: false
+    }
   }
 
   return { title: normalizedUrl, content: '', fetchMethod: 'failed', antiCrawlDetected: true }
@@ -1058,37 +1088,53 @@ async function fetchWithNativeExtractor(url: string) {
   try {
     const response = await fetch(url, {
       signal: controller.signal,
+      redirect: 'follow',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Sec-Ch-Ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Upgrade-Insecure-Requests': '1'
       }
     })
     clearTimeout(timeoutId)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const html = await response.text()
-    if (!html || html.length < 50) throw new Error('Empty HTML')
+    if (!html || html.length < 30) throw new Error('Empty HTML')
 
-    // 1. 提取网页标题 (优先 og:title，其次 <title>)
+    // 1. 提取网页标题 (优先 og:title / twitter:title，其次 <title>)
     const ogTitleMatch = html.match(/<meta\s+[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i) ||
-                         html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)
+                         html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i) ||
+                         html.match(/<meta\s+[^>]*name=["']twitter:title["'][^>]*content=["']([^"']+)["']/i) ||
+                         html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:title["']/i)
     const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
     const title = (ogTitleMatch?.[1] || titleTagMatch?.[1] || '').replace(/&[a-z0-9#]+;/gi, ' ').trim()
 
-    // 2. 提取网页描述 (优先 og:description，其次 description)
+    // 2. 提取网页描述与关键词 (og:description, description, keywords)
     const ogDescMatch = html.match(/<meta\s+[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i) ||
                         html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i) ||
                         html.match(/<meta\s+[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i) ||
-                        html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i)
+                        html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i) ||
+                        html.match(/<meta\s+[^>]*name=["']twitter:description["'][^>]*content=["']([^"']+)["']/i)
     const description = (ogDescMatch?.[1] || '').replace(/&[a-z0-9#]+;/gi, ' ').trim()
+
+    const kwMatch = html.match(/<meta\s+[^>]*name=["']keywords["'][^>]*content=["']([^"']+)["']/i) ||
+                    html.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*name=["']keywords["']/i)
+    const keywords = (kwMatch?.[1] || '').replace(/&[a-z0-9#]+;/gi, ' ').trim()
+
+    const siteNameMatch = html.match(/<meta\s+[^>]*property=["']og:site_name["'][^>]*content=["']([^"']+)["']/i) ||
+                          html.match(/<meta\s+[^>]*name=["']application-name["'][^>]*content=["']([^"']+)["']/i)
+    const siteName = (siteNameMatch?.[1] || '').trim()
 
     // 3. 提取主体区域 (优先 <article> 或 <main>)
     let targetHtml = html
     const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i)
     const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i)
-    if (articleMatch && articleMatch[1].length > 200) {
+    if (articleMatch && articleMatch[1].length > 150) {
       targetHtml = articleMatch[1]
-    } else if (mainMatch && mainMatch[1].length > 200) {
+    } else if (mainMatch && mainMatch[1].length > 150) {
       targetHtml = mainMatch[1]
     } else {
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
@@ -1120,7 +1166,8 @@ async function fetchWithNativeExtractor(url: string) {
       title,
       content: cleanText.slice(0, 15000),
       description,
-      siteName: ''
+      keywords,
+      siteName
     }
   } finally {
     clearTimeout(timeoutId)
@@ -1129,16 +1176,44 @@ async function fetchWithNativeExtractor(url: string) {
 
 async function fetchWithJina(url: string, apiKey?: string) {
   const jinaUrl = `https://r.jina.ai/${url}`
-  const headers: Record<string, string> = { 'Accept': 'application/json', 'X-Return-Format': 'markdown' }
+  const headers: Record<string, string> = {
+    'Accept': 'application/json, text/plain, text/markdown, */*',
+    'X-Return-Format': 'markdown',
+    'X-Timeout': '20'
+  }
   if (apiKey?.trim()) headers['Authorization'] = `Bearer ${apiKey.trim()}`
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒熔断
+  const timeoutId = setTimeout(() => controller.abort(), 25000) // 提升至 25 秒宽容超时，允许 Jina Headless 浏览器充分渲染
   try {
     const res = await fetch(jinaUrl, { headers, signal: controller.signal })
     clearTimeout(timeoutId)
     if (!res.ok) throw new Error(`Jina HTTP ${res.status}`)
-    const data = await res.json()
-    return { title: data?.data?.title || data?.title || '', content: data?.data?.content || data?.content || '' }
+
+    const rawText = await res.text()
+    if (!rawText || rawText.trim().length === 0) throw new Error('Jina returned empty body')
+
+    // 优先尝试 JSON 格式解析
+    if (rawText.trim().startsWith('{')) {
+      try {
+        const data = JSON.parse(rawText)
+        const content = data?.data?.content || data?.content || data?.data?.text || data?.text || ''
+        const title = data?.data?.title || data?.title || ''
+        if (content && typeof content === 'string') {
+          return { title: typeof title === 'string' ? title : '', content }
+        }
+      } catch {
+        // Fall through to plain text parsing
+      }
+    }
+
+    // 纯文本 Markdown 兼容解析
+    let title = ''
+    const titleMatch = rawText.match(/^Title:\s*(.+)$/im) || rawText.match(/^#\s+(.+)$/m)
+    if (titleMatch && titleMatch[1]) {
+      title = titleMatch[1].trim()
+    }
+
+    return { title, content: rawText }
   } finally {
     clearTimeout(timeoutId)
   }

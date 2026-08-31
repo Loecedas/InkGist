@@ -108,10 +108,10 @@ export default defineEventHandler(async (event) => {
     const userPrompt = `以下是目标网页的真实信息：
 【网址】：${cleanUrl}
 【网页标题】：${scrapedTitle}
-【网页清洗正文】：
-${scrapedContent ? scrapedContent.slice(0, 5000) : `${scrapedTitle} - ${cleanUrl}`}
+【网页内容/定位说明】：
+${scrapedContent ? scrapedContent.slice(0, 6000) : `网站名称：${scrapedTitle}，访问地址：${cleanUrl}`}
 
-【重点提示】：请严格按照上述 Markdown 格式输出，内容务必充实饱满，特别是“核心功能说明”请展开详细介绍（120~150字），不要过于简短！`
+【重点提示】：请严格按照上述 Markdown 格式输出。若该页面为单页应用、音视频社交平台、数字工具或创新项目，请结合其网页标题与产品定位深度展开，特别是“核心功能说明”请展开详细介绍（120~150字），不要过于简短！`
 
     // 4. 多模型统一调用 (支持 智谱 AI / DeepSeek / 谷歌 Gemini)
     let detailedSummary = ''
@@ -155,7 +155,7 @@ ${scrapedContent ? scrapedContent.slice(0, 5000) : `${scrapedTitle} - ${cleanUrl
 
     // 5. 若 AI 未能生成总结，且抓取到了真实有效标题/内容，提供保底标准总结
     if (!detailedSummary) {
-      if (!scrapedContent && scrapedTitle === hostname) {
+      if (!scrapedContent && (!scrapedTitle || scrapedTitle === hostname)) {
         throw createError({
           statusCode: 400,
           statusMessage: `该网址无有效网页内容，无法生成总结`
