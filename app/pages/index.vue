@@ -1,14 +1,21 @@
 <template>
   <div class="homepage-layout">
-    <!-- 左上角极简悬浮小书签按钮 (黑白风格) -->
+    <!-- 左上角极简悬浮小书签与系统更新按钮 -->
     <div class="top-left-floating-bar">
       <button class="nav-bookmarklet-btn" title="浏览器小书签 (Bookmarklet)" @click="showBookmarkletModal = true">
         <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sparkles"></svg>
         <span>小书签</span>
       </button>
+
+      <!-- 系统自动更新 -->
+      <button class="nav-update-btn" :class="{ 'has-new-update': versionInfo.hasUpdate }" title="系统自动更新" @click="openUpdateModal">
+        <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sync"></svg>
+        <span>自动更新</span>
+        <span v-if="versionInfo.hasUpdate" class="update-pulse-dot" title="发现可用新版本"></span>
+      </button>
     </div>
 
-    <!-- 右上角极简悬浮操作栏：退出登录 (左) + 跟随系统 (中) + 进入书签 (右) -->
+    <!-- 右上角极简悬浮操作栏：退出登录 (左) + 跟随系统 (中) + 进入快照 (中) + 进入书签 (右) -->
     <div class="top-right-floating-bar">
       <!-- 1. 退出登录按钮 -->
       <button class="nav-logout-btn" title="退出登录" @click="handleLogout">
@@ -22,7 +29,13 @@
         <span class="theme-label">{{ currentLabel }}</span>
       </button>
 
-      <!-- 3. 进入书签按钮 -->
+      <!-- 3. 进入快照库按钮 -->
+      <NuxtLink to="/snapshots" class="nav-switch-btn" title="进入网页快照库 (离线归档)">
+        <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.camera"></svg>
+        <span>快照</span>
+      </NuxtLink>
+
+      <!-- 4. 进入书签按钮 -->
       <NuxtLink to="/bookmarks" class="nav-switch-btn" title="进入书签库">
         <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
         <span>书签</span>
@@ -99,17 +112,67 @@
                     <span>一键取消总结 ({{ activeConcurrentCount + queuedCount }})</span>
                   </button>
 
-                  <!-- 一键全部加入书签按钮 -->
-                  <button
-                    v-if="unsavedCompletedCount > 0"
-                    type="button"
-                    class="btn-primary btn-sm batch-action-btn"
-                    :title="`一键将已生成的 ${unsavedCompletedCount} 个总结全部保存至书签库`"
-                    @click="handleBatchSaveAllToBookmarks"
-                  >
-                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
-                    <span>一键全部加入书签 ({{ unsavedCompletedCount }} 个)</span>
-                  </button>
+                  <!-- 批量加入书签控制 (无重复时为普通大按钮，有已入库项时展示为下拉选择框) -->
+                  <template v-if="unsavedCompletedCount > 0">
+                    <!-- 情况 A：所有总结的链接均未被添加到书签库，显示常规大按钮 -->
+                    <button
+                      v-if="!hasCompletedInBookmarks"
+                      type="button"
+                      class="btn-primary btn-sm batch-action-btn"
+                      :title="`一键将已生成的 ${unsavedCompletedCount} 个总结全部保存至书签库`"
+                      @click="handleBatchSaveAllToBookmarks"
+                    >
+                      <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
+                      <span>一键全部加入书签 ({{ unsavedCompletedCount }} 个)</span>
+                    </button>
+
+                    <!-- 情况 B：存在 1 个或多个已在书签库中的链接，展示下拉框形式提供两个选项 -->
+                    <div v-else class="batch-dropdown-container">
+                      <button
+                        type="button"
+                        class="btn-primary btn-sm batch-action-btn batch-dropdown-trigger"
+                        :class="{ 'is-active': showBatchDropdown }"
+                        title="批量处理书签 (点击展开操作选项)"
+                        @click.stop="showBatchDropdown = !showBatchDropdown"
+                      >
+                        <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
+                        <span>批量加入书签 ({{ unsavedCompletedCount }} 个)</span>
+                        <svg class="svg-icon dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="showBatchDropdown ? ICONS.chevronUp : ICONS.chevronDown"></svg>
+                      </button>
+
+                      <Transition name="dropdown-pop">
+                        <div v-if="showBatchDropdown" class="batch-dropdown-menu" @click.stop>
+                          <!-- 选项一：覆盖相同书签 -->
+                          <button
+                            type="button"
+                            class="dropdown-menu-item"
+                            title="覆盖更新已存在的旧书签并加入新书签"
+                            @click="handleBatchOverwriteBookmarks"
+                          >
+                            <svg class="svg-icon menu-item-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.refresh"></svg>
+                            <div class="menu-item-text-group">
+                              <span class="menu-item-title">覆盖相同书签</span>
+                              <span class="menu-item-desc">自动覆盖更新 {{ completedInBookmarksCount }} 个已有书签，其余直接加入</span>
+                            </div>
+                          </button>
+
+                          <!-- 选项二：一键加入书签 -->
+                          <button
+                            type="button"
+                            class="dropdown-menu-item"
+                            title="一键将所有已生成的总结加入书签库"
+                            @click="handleBatchSaveAllToBookmarks"
+                          >
+                            <svg class="svg-icon menu-item-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
+                            <div class="menu-item-text-group">
+                              <span class="menu-item-title">一键加入书签</span>
+                              <span class="menu-item-desc">一键将已生成的 {{ unsavedCompletedCount }} 个总结加入书签库</span>
+                            </div>
+                          </button>
+                        </div>
+                      </Transition>
+                    </div>
+                  </template>
 
                   <!-- 清空全部输入框 -->
                   <button
@@ -175,21 +238,40 @@
                     </button>
                   </div>
 
-                  <!-- 每一个方框右侧独立的「生成总结」黑白胶囊按钮 -->
-                  <button
-                    type="button"
-                    class="btn-primary submit-action-btn"
-                    :class="{ 'btn-is-queued': row.isQueued }"
-                    :disabled="!row.url.trim() || row.isGenerating || row.isTyping || row.isQueued"
-                    :title="row.isQueued ? '当前已有 5 个任务并发进行，正在排队中...' : '一键生成 AI 智能总结'"
-                    @click="handleStartRowSummary(row)"
-                  >
-                    <span v-if="row.isGenerating || row.isTyping" class="spinner-icon"></span>
-                    <span v-if="row.isQueued">⏳ 排队等待中...</span>
-                    <span v-else-if="row.isGenerating">正在深度提炼中...</span>
-                    <span v-else-if="row.isTyping">正在生成输出中...</span>
-                    <span v-else>生成总结</span>
-                  </button>
+                  <!-- 每一个方框右侧的操作按钮组：生成快照 + 生成总结 -->
+                  <div class="row-actions-group">
+                    <!-- 生成快照按钮 (水墨辅助黑白按钮) -->
+                    <button
+                      type="button"
+                      class="btn-secondary snapshot-action-btn"
+                      :disabled="!row.url.trim() || row.isGenerating || row.isTyping || row.isQueued || row.isGeneratingSnapshot"
+                      :title="row.isGeneratingSnapshot ? '正在抓取并保存离线快照...' : '一键生成并保存该网页的离线图文快照'"
+                      @click="handleStartRowSnapshot(row)"
+                    >
+                      <span v-if="row.isGeneratingSnapshot" class="spinner-icon dark-spinner"></span>
+                      <svg v-else class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.camera"></svg>
+                      <span>{{ row.isGeneratingSnapshot ? '快照中...' : '生成快照' }}</span>
+                    </button>
+
+                    <!-- 生成总结按钮 (黑白胶囊按钮) -->
+                    <button
+                      type="button"
+                      class="btn-primary submit-action-btn"
+                      :class="{ 'btn-is-queued': row.isQueued }"
+                      :disabled="!row.url.trim() || row.isGenerating || row.isTyping || row.isQueued || row.isGeneratingSnapshot"
+                      :title="row.isQueued ? '当前已有 5 个任务并发进行，正在排队中...' : '一键生成 AI 智能总结'"
+                      @click="handleStartRowSummary(row)"
+                    >
+                      <span v-if="row.isGenerating || row.isTyping" class="spinner-icon"></span>
+                      <span v-if="row.isQueued" class="btn-inline-icon-text">
+                        <svg class="svg-icon spin-slow" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.refresh"></svg>
+                        <span>排队等待中...</span>
+                      </span>
+                      <span v-else-if="row.isGenerating">正在深度提炼中...</span>
+                      <span v-else-if="row.isTyping">正在生成输出中...</span>
+                      <span v-else>生成总结</span>
+                    </button>
+                  </div>
                 </div>
 
                 <!-- 独立错误提示横幅 (纯黑白风格，无前置圆圈图标) -->
@@ -253,11 +335,11 @@
                             v-if="!row.isEditing"
                             class="btn-sm action-btn"
                             :class="row.saved ? 'btn-success' : 'btn-primary'"
-                            :title="row.saved ? '已成功保存至书签' : '将当前总结与网址保存为书签'"
+                            :title="row.saved ? (row.saveToastText || '已完成保存') : (isRowInBookmarks(row) ? '该网址已在书签库中，点击覆盖旧书签' : '将当前总结与网址保存为书签')"
                             @click="handleSaveRowToBookmark(row)"
                           >
-                            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="row.saved ? ICONS.check : ICONS.bookmark"></svg>
-                            <span>{{ row.saved ? (row.saveToastText || '已保存至书签') : '保存到书签' }}</span>
+                            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="row.saved ? ICONS.check : (isRowInBookmarks(row) ? ICONS.refresh : ICONS.bookmark)"></svg>
+                            <span>{{ row.saved ? (row.saveToastText || (isRowInBookmarks(row) ? '已覆盖旧书签' : '已保存至书签')) : (isRowInBookmarks(row) ? '覆盖旧书签' : '保存到书签') }}</span>
                           </button>
 
                           <button
@@ -280,7 +362,10 @@
 
                   <div class="result-title-and-url-section">
                     <div class="result-title-badge-row">
-                      <span v-if="row.folder" class="home-folder-chip" :title="`所属浏览器分类：${row.folder}`">📁 {{ row.folder }}</span>
+                      <span v-if="row.folder" class="home-folder-chip" :title="`所属浏览器分类：${row.folder}`">
+                        <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+                        <span>{{ row.folder }}</span>
+                      </span>
                       <h2 class="result-display-title">{{ row.result?.title || row.url }}</h2>
                     </div>
                     <a :href="row.result?.url || row.url" target="_blank" rel="noopener noreferrer" class="result-display-url" title="点击访问原网页">
@@ -348,21 +433,52 @@
       v-model="showExtensionModal"
       @import-bookmarks="handleImportBookmarksFromExt"
     />
+
+    <!-- 系统自动检测与在线升级弹窗 -->
+    <UpdateModal />
+
+    <!-- 首页全局提示 (快照生成成功提示) -->
+    <Transition name="toast-fade">
+      <div v-if="homepageToast" class="homepage-toast-notification">
+        <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.check"></svg>
+        <span>{{ homepageToast }}</span>
+        <NuxtLink v-if="lastSnapshotId" :to="`/snapshot/${lastSnapshotId}`" class="toast-view-link" title="点击查看刚生成的网页快照">
+          <span>立即查看</span>
+          <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.external"></svg>
+        </NuxtLink>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useAuth, useBookmarks, useTheme, ICONS, getAuthHeaders } from './state'
+import { useAuth, useBookmarks, useSnapshots, useTheme, ICONS, getAuthHeaders, type SnapshotItem } from './state'
+import { useUpdater } from '../utils/updater'
 import BookmarkletModal from '../components/BookmarkletModal.vue'
 import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
+import UpdateModal from '../components/UpdateModal.vue'
+
+definePageMeta({
+  keepalive: true
+})
 
 const router = useRouter()
 const route = useRoute()
 const { logout } = useAuth()
-const { addBookmark } = useBookmarks()
+const { addBookmark, bookmarks } = useBookmarks()
+const { addSnapshot } = useSnapshots()
 const { themeMode, cycleTheme } = useTheme()
+const { versionInfo, openUpdateModal, checkUpdateSilently } = useUpdater()
+
+onMounted(() => {
+  checkUpdateSilently()
+})
+
+onActivated(() => {
+  checkAndExecuteUrlQuery()
+})
 
 // ==========================================
 // 状态管理
@@ -371,15 +487,11 @@ export interface InputRowItem {
   id: string
   url: string
   title?: string
-  isQueued?: boolean
-  isGenerating?: boolean
-  isTyping?: boolean
-  streamedText?: string
-  title?: string
   folder?: string
   isQueued: boolean
   isGenerating: boolean
   isTyping: boolean
+  isGeneratingSnapshot?: boolean
   streamedText: string
   errorMessage: string
   isEditing?: boolean
@@ -418,6 +530,30 @@ const inputRows = ref<InputRowItem[]>([
 
 const showBookmarkletModal = ref(false)
 const showExtensionModal = ref(false)
+const showBatchDropdown = ref(false)
+
+// 规范化 URL 判定工具
+const normUrl = (u: string) => {
+  if (!u) return ''
+  try {
+    const parsed = new URL(u.startsWith('http') ? u.trim() : 'https://' + u.trim())
+    let pathname = parsed.pathname
+    if (pathname === '/') pathname = ''
+    else pathname = pathname.replace(/\/+$/, '')
+    return (parsed.hostname.toLowerCase() + pathname + (parsed.search ? parsed.search.toLowerCase() : '')).toLowerCase()
+  } catch {
+    return u.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+  }
+}
+
+// 判断某个总结项的网址是否已保存在当前书签库中
+const isRowInBookmarks = (row: InputRowItem) => {
+  const targetUrl = row.result?.url || row.url
+  if (!targetUrl || !targetUrl.trim()) return false
+  const targetNorm = normUrl(targetUrl)
+  return bookmarks.value.some(b => normUrl(b.url) === targetNorm)
+}
+
 const currentTimeStr = ref(new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }))
 const formatDisplayTime = (ts?: string | number | Date) => {
   if (!ts) {
@@ -538,6 +674,14 @@ const inProgressCount = computed(() => inputRows.value.filter(r => r.isGeneratin
 const pendingCount = computed(() => inputRows.value.filter(r => !r.result && !r.isGenerating && !r.isTyping && !r.isQueued && r.url.trim()).length)
 const unsavedCompletedCount = computed(() => inputRows.value.filter(r => !!r.result && !r.saved).length)
 
+// 已完成未保存项中，有多少个已存在于书签库中
+const completedInBookmarksCount = computed(() => {
+  return inputRows.value.filter(r => !!r.result && !r.saved && isRowInBookmarks(r)).length
+})
+
+// 是否存在至少 1 个已在书签库中的总结结果
+const hasCompletedInBookmarks = computed(() => completedInBookmarksCount.value > 0)
+
 // 一键全部开始总结：将所有待总结的任务按 5 并发流水线批量启动
 const handleStartBatchAll = () => {
   const pendingRows = inputRows.value.filter(r => !r.result && !r.isGenerating && !r.isTyping && !r.isQueued && r.url.trim())
@@ -566,12 +710,14 @@ const handleCancelBatchAll = () => {
   activeConcurrentCount.value = 0
 }
 
-// 一键全部保存到书签并自动按原浏览器分类归档
+// 一键全部保存到书签
 const handleBatchSaveAllToBookmarks = async () => {
+  showBatchDropdown.value = false
   const completedUnsaved = inputRows.value.filter(r => !!r.result && !r.saved)
   if (!completedUnsaved.length) return
   for (const row of completedUnsaved) {
     if (row.result) {
+      const wasIn = isRowInBookmarks(row)
       await addBookmark({
         title: row.result.title,
         url: row.result.url,
@@ -583,7 +729,31 @@ const handleBatchSaveAllToBookmarks = async () => {
         color: '#0f172a'
       })
       row.saved = true
-      row.saveToastText = '已保存'
+      row.saveToastText = wasIn ? '已覆盖旧书签' : '已保存'
+    }
+  }
+}
+
+// 批量覆盖相同书签：覆盖更新已存在的书签，同时将新书签加入
+const handleBatchOverwriteBookmarks = async () => {
+  showBatchDropdown.value = false
+  const completedUnsaved = inputRows.value.filter(r => !!r.result && !r.saved)
+  if (!completedUnsaved.length) return
+  for (const row of completedUnsaved) {
+    if (row.result) {
+      const wasIn = isRowInBookmarks(row)
+      await addBookmark({
+        title: row.result.title,
+        url: row.result.url,
+        summary: row.result.detailedSummary,
+        tags: row.result.tags,
+        description: row.result.title,
+        folder: row.folder ? row.folder.trim() : undefined,
+        icon: 'bookmark',
+        color: '#0f172a'
+      })
+      row.saved = true
+      row.saveToastText = wasIn ? '已覆盖旧书签' : '已保存'
     }
   }
 }
@@ -682,11 +852,16 @@ const checkAndExecuteUrlQuery = async () => {
   }
 }
 
+const closeDropdown = () => {
+  showBatchDropdown.value = false
+}
+
 onMounted(() => {
   if (typeof window !== 'undefined') {
     mql = window.matchMedia('(max-width: 640px)')
     updatePlaceholder()
     window.addEventListener('resize', updatePlaceholder)
+    window.addEventListener('click', closeDropdown)
 
     checkAndExecuteUrlQuery()
   }
@@ -695,6 +870,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updatePlaceholder)
+    window.removeEventListener('click', closeDropdown)
   }
 })
 
@@ -804,6 +980,53 @@ const setRowError = (row: InputRowItem, msg: string) => {
       row.errorMessage = ''
     }
   }, 5000)
+}
+
+// 首页全局微提示
+const homepageToast = ref('')
+const lastSnapshotId = ref('')
+const showHomepageToast = (msg: string, snapshotId?: string) => {
+  homepageToast.value = msg
+  lastSnapshotId.value = snapshotId || ''
+  setTimeout(() => {
+    if (homepageToast.value === msg) {
+      homepageToast.value = ''
+      lastSnapshotId.value = ''
+    }
+  }, 4000)
+}
+
+// 启动网页快照生成 (支持在首页直接输入链接生成离线图文快照，失败提示小书签并在同位置停留5秒自动消失)
+const handleStartRowSnapshot = async (row: InputRowItem) => {
+  const targetUrl = row.url.trim()
+  if (!targetUrl || row.isGenerating || row.isTyping || row.isQueued || row.isGeneratingSnapshot) return
+
+  // 1. 严格网址有效性校验
+  if (!isValidPublicUrl(targetUrl)) {
+    setRowError(row, '请输入合法的有效公网网址 (例如: juejin.cn 或 github.com)')
+    return
+  }
+
+  row.isGeneratingSnapshot = true
+  row.errorMessage = ''
+
+  try {
+    const res = await $fetch<{ success: boolean; snapshot: SnapshotItem }>('/api/snapshot', {
+      method: 'POST',
+      body: { url: targetUrl }
+    })
+
+    if (res && res.success && res.snapshot) {
+      await addSnapshot(res.snapshot)
+      showHomepageToast('🎉 网页快照生成成功，已存入快照库！', res.snapshot.id)
+    } else {
+      setRowError(row, '快照生成失败（目标网站可能存在防爬限制或网络超时），建议使用左上角「小书签」在当前网页一键快照保存')
+    }
+  } catch (err: any) {
+    setRowError(row, '快照生成失败（目标网站可能存在防爬限制或网络超时），建议使用左上角「小书签」在当前网页一键快照保存')
+  } finally {
+    row.isGeneratingSnapshot = false
+  }
 }
 
 // 启动总结（严格网址校验 + 受控并发 + 防重复总结相同网址）
@@ -962,6 +1185,7 @@ const finishEditRowSummary = (row: InputRowItem) => {
 
 const handleSaveRowToBookmark = async (row: InputRowItem) => {
   if (!row.result) return
+  const wasAlreadyInBookmarks = isRowInBookmarks(row)
   const folderName = row.folder ? row.folder.trim() : undefined
   const saveRes = await addBookmark({
     title: row.result.title,
@@ -973,7 +1197,8 @@ const handleSaveRowToBookmark = async (row: InputRowItem) => {
     icon: 'bookmark',
     color: '#0f172a'
   })
-  row.saveToastText = saveRes?.isUpdate ? '已更新原有书签' : (folderName ? `已保存至 [${folderName}]` : '已保存至书签')
+  const isUpdate = saveRes?.isUpdate || wasAlreadyInBookmarks
+  row.saveToastText = isUpdate ? '已覆盖旧书签' : (folderName ? `已保存至 [${folderName}]` : '已保存至书签')
   row.saved = true
   setTimeout(() => {
     row.saved = false
@@ -1045,6 +1270,7 @@ const formatMdToHtml = (textSource: string) => {
   z-index: 99;
   display: flex;
   align-items: center;
+  gap: 0.6rem;
 }
 
 .top-right-floating-bar {
@@ -1098,6 +1324,54 @@ const formatMdToHtml = (textSource: string) => {
   border-color: var(--text-main);
   background-color: var(--bg-surface-hover);
   color: var(--text-main);
+}
+
+.nav-update-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.15s ease;
+}
+
+.nav-update-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-strong);
+  background-color: var(--bg-surface-hover);
+}
+
+.nav-update-btn.has-new-update {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: var(--primary);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--bg-surface) 100%);
+}
+
+.update-pulse-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow: 0 0 0 2px var(--bg-surface);
+  animation: pulseDot 1.8s infinite;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 .theme-toggle-btn {
@@ -1302,6 +1576,99 @@ const formatMdToHtml = (textSource: string) => {
   gap: 0.35rem;
 }
 
+.batch-dropdown-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.batch-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.dropdown-arrow {
+  transition: transform 0.2s ease;
+  margin-left: 0.15rem;
+}
+
+.batch-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 120;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 260px;
+  backdrop-filter: blur(12px);
+}
+
+.dropdown-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dropdown-menu-item:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-subtle);
+}
+
+.menu-item-icon {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  color: var(--text-main);
+}
+
+.menu-item-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.menu-item-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.menu-item-desc {
+  font-size: 0.71875rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* 下拉菜单弹出动画 */
+.dropdown-pop-enter-active,
+.dropdown-pop-leave-active {
+  transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+.dropdown-pop-enter-from,
+.dropdown-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.95) translateY(-6px);
+}
+
 .btn-cancel-batch {
   background-color: var(--bg-surface);
   color: var(--text-main);
@@ -1464,6 +1831,40 @@ const formatMdToHtml = (textSource: string) => {
   color: var(--text-main);
 }
 
+.row-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.snapshot-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-main);
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.snapshot-action-btn:hover:not(:disabled) {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-main);
+}
+.snapshot-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .submit-action-btn {
   display: inline-flex;
   align-items: center;
@@ -1490,6 +1891,57 @@ const formatMdToHtml = (textSource: string) => {
   animation: spin 0.8s linear infinite;
   display: inline-block;
   flex-shrink: 0;
+}
+
+.dark-spinner {
+  border-color: rgba(15, 23, 42, 0.2);
+  border-top-color: var(--text-main);
+}
+html.dark .dark-spinner {
+  border-color: rgba(255, 255, 255, 0.2);
+  border-top-color: var(--text-main);
+}
+
+.homepage-toast-notification {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+.toast-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-main);
+  font-weight: 600;
+  text-decoration: underline;
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 10px);
 }
 
 @keyframes spin {
@@ -1806,6 +2258,7 @@ const formatMdToHtml = (textSource: string) => {
 @media (max-width: 640px) {
   /* 顶部导航按钮：375 和 425 尺寸下仅显示图标，隐藏文字 */
   .nav-bookmarklet-btn span,
+  .nav-update-btn span,
   .nav-logout-btn span,
   .theme-toggle-btn span,
   .nav-switch-btn span {
@@ -1813,6 +2266,7 @@ const formatMdToHtml = (textSource: string) => {
   }
 
   .nav-bookmarklet-btn,
+  .nav-update-btn,
   .nav-logout-btn,
   .theme-toggle-btn,
   .nav-switch-btn {
@@ -1826,13 +2280,13 @@ const formatMdToHtml = (textSource: string) => {
   .top-left-floating-bar,
   .top-right-floating-bar {
     top: 0.75rem;
+    gap: 0.4rem;
   }
   .top-left-floating-bar {
     left: 0.75rem;
   }
   .top-right-floating-bar {
     right: 0.75rem;
-    gap: 0.4rem;
   }
 
   .homepage-main {
@@ -1852,12 +2306,25 @@ const formatMdToHtml = (textSource: string) => {
     padding: 0.6rem;
   }
 
-  .submit-action-btn {
+  .row-actions-group {
+    display: flex;
     width: 100%;
-    height: 42px;
+    gap: 0.45rem;
+  }
+
+  .snapshot-action-btn {
+    flex: 1;
+    height: 40px;
+    justify-content: center;
+    font-size: 0.84rem;
+  }
+
+  .submit-action-btn {
+    flex: 1.5;
+    height: 40px;
     justify-content: center;
     border-radius: var(--radius-md);
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
   }
 
   .result-header {

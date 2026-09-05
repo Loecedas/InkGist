@@ -1,7 +1,7 @@
 <template>
   <div class="app-root">
     <div class="app-page-content">
-      <NuxtPage />
+      <NuxtPage :keepalive="{ max: 10 }" />
     </div>
     <AppFooter />
   </div>

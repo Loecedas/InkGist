@@ -146,14 +146,33 @@
             <span class="file-ext">{{ exportFormat === 'markdown' ? '.md' : '.html' }}</span>
           </div>
         </div>
+
+        <!-- 导出后操作选项：导出后删除 -->
+        <div class="export-post-action-section">
+          <label class="delete-after-export-label" :class="{ 'is-checked': deleteAfterExport }">
+            <input
+              v-model="deleteAfterExport"
+              type="checkbox"
+              class="custom-cb"
+            />
+            <div class="delete-option-info">
+              <span class="delete-option-title">导出后自动删除已导出的书签</span>
+              <span class="delete-option-tip">导出成功后，将自动从书签库中移除这 {{ targetBookmarksCount }} 条书签（便于归档与转移至其他应用）</span>
+            </div>
+          </label>
+        </div>
       </div>
 
       <div class="modal-footer">
         <div class="footer-stats-text">
           <span v-if="isSyncingKarakeep" class="syncing-indicator">
-            ⏳ 正在同步至 Karakeep，请稍候...
+            <svg class="svg-icon spin-slow" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.refresh"></svg>
+            <span>正在同步至 Karakeep，请稍候...</span>
           </span>
-          <span v-else>预计将{{ exportFormat === 'karakeep' ? '同步' : '导出' }} <strong>{{ targetBookmarksCount }}</strong> 条书签</span>
+          <span v-else>
+            预计将{{ exportFormat === 'karakeep' ? '同步' : '导出' }} <strong>{{ targetBookmarksCount }}</strong> 条书签
+            <span v-if="deleteAfterExport" class="footer-del-tip">（导出后将从书签库中删除）</span>
+          </span>
         </div>
         <div class="footer-btn-group">
           <button class="btn-secondary btn-sm" :disabled="isSyncingKarakeep" @click="closeModal">取消</button>
@@ -162,9 +181,9 @@
             :disabled="targetBookmarksCount === 0 || isSyncingKarakeep"
             @click="handleExport"
           >
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="exportFormat === 'karakeep' ? ICONS.sync : ICONS.download"></svg>
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="exportFormat === 'karakeep' ? ICONS.refresh : ICONS.download"></svg>
             <span>
-              {{ isSyncingKarakeep ? '正在推送同步...' : exportFormat === 'karakeep' ? `立即同步至 Karakeep (${targetBookmarksCount})` : exportFormat === 'markdown' ? '立即导出 Markdown' : '立即导出 HTML' }}
+              {{ isSyncingKarakeep ? '正在推送同步...' : exportFormat === 'karakeep' ? `立即同步至 Karakeep (${targetBookmarksCount})` : exportFormat === 'markdown' ? (deleteAfterExport ? '导出并删除 Markdown' : '立即导出 Markdown') : (deleteAfterExport ? '导出并删除 HTML' : '立即导出 HTML') }}
             </span>
           </button>
         </div>
@@ -175,7 +194,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { ICONS, type Bookmark } from '../pages/state'
+import { ICONS, useBookmarks, type Bookmark } from '../pages/state'
 import { downloadBookmarksAsHtml } from '../utils/bookmark-io'
 
 const props = defineProps<{
@@ -187,11 +206,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
-  (e: 'exported', count: number): void
+  (e: 'exported', count: number, wasDeleted?: boolean): void
 }>()
+
+const { deleteBookmark } = useBookmarks()
 
 const exportFormat = ref<'html' | 'markdown' | 'karakeep'>('html')
 const exportScope = ref<'all' | 'custom'>('all')
+const deleteAfterExport = ref(false)
 const customFilename = ref('InkGist_Bookmarks')
 const customSearchFilter = ref('')
 const customSelectedBookmarkIds = ref<Set<string>>(new Set())
@@ -426,8 +448,13 @@ const handleExport = async () => {
       })
 
       if (res && res.success && res.syncedCount > 0) {
-        emit('exported', res.syncedCount)
-        alert(`🎉 成功同步 ${res.syncedCount} / ${res.total} 条书签至 Karakeep！\n\n📌 标题已严格对齐，描述与概括字段均已精准映射填充。`)
+        if (deleteAfterExport.value) {
+          for (const bm of list) {
+            if (bm.id) await deleteBookmark(bm.id)
+          }
+        }
+        emit('exported', res.syncedCount, deleteAfterExport.value)
+        alert(`🎉 成功同步 ${res.syncedCount} / ${res.total} 条书签至 Karakeep！${deleteAfterExport.value ? '\n\n🗑️ 已自动从书签库中删除已同步的书签。' : ''}\n\n📌 标题已严格对齐，描述与概括字段均已精准映射填充。`)
         closeModal()
       } else {
         const errorDetail = res?.error || (res?.errors && res.errors[0]?.error) || '未能成功将书签写入 Karakeep 实例'
@@ -452,7 +479,14 @@ const handleExport = async () => {
     downloadBookmarksAsHtml(list, fname)
   }
 
-  emit('exported', list.length)
+  // 导出文件后自动删除已导出的书签
+  if (deleteAfterExport.value) {
+    for (const bm of list) {
+      if (bm.id) await deleteBookmark(bm.id)
+    }
+  }
+
+  emit('exported', list.length, deleteAfterExport.value)
   closeModal()
 }
 </script>
@@ -556,6 +590,60 @@ const handleExport = async () => {
   color: var(--text-main);
   margin-bottom: 0.5rem;
   display: block;
+}
+
+.export-post-action-section {
+  margin-top: 0.25rem;
+}
+
+.delete-after-export-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-subtle);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.delete-after-export-label:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-surface-hover);
+}
+
+.delete-after-export-label.is-checked {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.delete-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.delete-option-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.delete-after-export-label.is-checked .delete-option-title {
+  color: #ef4444;
+}
+
+.delete-option-tip {
+  font-size: 0.71875rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.footer-del-tip {
+  color: #ef4444;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .format-toggle-grid {

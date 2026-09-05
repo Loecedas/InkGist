@@ -1,5 +1,6 @@
 {
   "name": "inkgist",
+  "version": "1.0.0",
   "type": "module",
   "private": true,
   "scripts": {
@@ -13,8 +14,13 @@
   },
   "dependencies": {
     "defuddle": "^0.19.2",
+    "dompurify": "^3.4.14",
+    "marked": "^18.0.11",
     "nuxt": "^4.5.2",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5"
   }
 }

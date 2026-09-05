@@ -49,6 +49,7 @@
 
           <!-- 右上角操作区：批量管理 + 导出 + 退出登录 + 主题切换 + 返回首页 -->
           <div class="header-right-actions">
+
             <button
               class="nav-action-btn"
               :class="{ active: isSelectMode }"
@@ -78,6 +79,11 @@
               <SvgIcon :svg="currentIconSvg" size="14" />
               <span class="theme-label">{{ currentLabel }}</span>
             </button>
+
+            <NuxtLink to="/snapshots" class="nav-switch-btn" title="进入网页快照库 (离线归档)">
+              <SvgIcon name="camera" size="14" />
+              <span>快照</span>
+            </NuxtLink>
 
             <NuxtLink to="/" class="nav-switch-btn" title="进入首页">
               <SvgIcon name="home" size="14" />
@@ -431,6 +437,9 @@
     <div v-if="toastMessage" class="toast-notification-pill">
       <span>{{ toastMessage }}</span>
     </div>
+
+    <!-- 系统自动检测与在线升级弹窗 -->
+    <UpdateModal />
   </div>
 </template>
 
@@ -445,8 +454,15 @@ import MoveFolderModal from '../components/MoveFolderModal.vue'
 import MobileFolderSelectModal from '../components/MobileFolderSelectModal.vue'
 import ExportBookmarkModal from '../components/ExportBookmarkModal.vue'
 import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
+import UpdateModal from '../components/UpdateModal.vue'
 import { useAuth, useBookmarks, useTheme, ICONS, type Bookmark } from './state'
+import { useUpdater } from '../utils/updater'
 
+definePageMeta({
+  keepalive: true
+})
+
+const { versionInfo, openUpdateModal, checkUpdateSilently } = useUpdater()
 const { logout } = useAuth()
 const {
   bookmarks,
@@ -509,6 +525,7 @@ const handleDocumentClick = (e: MouseEvent | TouchEvent) => {
 
 onMounted(() => {
   updateScreenSize()
+  checkUpdateSilently()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateScreenSize)
     window.addEventListener('pointerdown', handleDocumentClick, { passive: true })
@@ -589,8 +606,12 @@ const batchDeleteSelected = () => {
   showToast(`已批量删除 ${count} 条书签`)
 }
 
-const handleExported = (count: number) => {
-  showToast(`已成功导出 ${count} 条书签 HTML 文件`)
+const handleExported = (count: number, wasDeleted = false) => {
+  if (wasDeleted) {
+    showToast(`已成功导出并从书签库中删除 ${count} 条书签`)
+  } else {
+    showToast(`已成功导出 ${count} 条书签`)
+  }
   if (isSelectMode.value) {
     isSelectMode.value = false
     selectedBookmarkIds.value.clear()
@@ -2877,6 +2898,35 @@ const extractActions = (bm: Bookmark): string[] => {
   background-color: var(--primary);
   color: var(--primary-contrast);
   border-color: var(--primary);
+}
+
+.nav-update-btn-header {
+  position: relative;
+  font-weight: 600;
+}
+
+.nav-update-btn-header.has-new {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: var(--primary);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--bg-surface) 100%);
+}
+
+.update-pulse-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow: 0 0 0 2px var(--bg-surface);
+  animation: pulseDot 1.8s infinite;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 /* 底部悬浮批量管理栏 */

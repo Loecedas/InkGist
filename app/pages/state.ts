@@ -1334,5 +1334,209 @@ export const ICONS: Record<string, string> = {
   arrowUp: '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>',
   cornerUpLeft: '<polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>',
   alert: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>',
+  refresh: '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path>',
+  sync: '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"></polyline>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"></polyline>',
+  layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>',
+  filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle>',
+  archive: '<polyline points="21 8 21 21 3 21 3 8"></polyline><rect width="22" height="5" x="1" y="3" rx="1"></rect><line x1="10" y1="12" x2="14" y2="12"></line>',
+  share: '<circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>',
+  arrowLeft: '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>',
   github: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>'
+}
+
+// =============================================================================
+// 6. 网页离线快照与归档状态管理 (useSnapshots)
+// =============================================================================
+export interface SnapshotItem {
+  id: string
+  url: string
+  title: string
+  description: string
+  siteName: string
+  coverImage?: string
+  contentHtml: string
+  wordCount?: number
+  createdAt: string
+}
+
+const STORAGE_KEY_SNAPSHOTS_META = 'inkgist_snapshots_meta_v1'
+const DB_NAME = 'inkgist_snapshots_db'
+const DB_STORE = 'snapshots_content'
+
+const snapshots = ref<SnapshotItem[]>([])
+const isSnapshotsLoaded = ref(false)
+
+// IndexedDB 初始化与存取引擎 (支撑大容量富文本图文与断网秒开)
+const openSnapshotDb = (): Promise<IDBDatabase | null> => {
+  if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    try {
+      const request = window.indexedDB.open(DB_NAME, 1)
+      request.onupgradeneeded = (e: any) => {
+        const db = e.target.result
+        if (!db.objectStoreNames.contains(DB_STORE)) {
+          db.createObjectStore(DB_STORE, { keyPath: 'id' })
+        }
+      }
+      request.onsuccess = (e: any) => resolve(e.target.result)
+      request.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+const saveSnapshotContentToIdb = async (id: string, contentHtml: string): Promise<boolean> => {
+  const db = await openSnapshotDb()
+  if (!db) return false
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(DB_STORE, 'readwrite')
+      const store = tx.objectStore(DB_STORE)
+      const req = store.put({ id, contentHtml })
+      req.onsuccess = () => resolve(true)
+      req.onerror = (e: any) => {
+        const err = req.error || e?.target?.error
+        if (err && (err.name === 'QuotaExceededError' || err.code === 22)) {
+          reject(new Error('浏览器本地存储空间已满 (QuotaExceededError)，请前往快照库删除部分旧快照后再试'))
+        } else {
+          reject(err || new Error('保存快照到本地数据库失败'))
+        }
+      }
+    } catch (e: any) {
+      if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+        reject(new Error('浏览器本地存储空间已满 (QuotaExceededError)，请前往快照库删除部分旧快照后再试'))
+      } else {
+        reject(e)
+      }
+    }
+  })
+}
+
+const getSnapshotContentFromIdb = async (id: string): Promise<string | null> => {
+  const db = await openSnapshotDb()
+  if (!db) return null
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(DB_STORE, 'readonly')
+      const store = tx.objectStore(DB_STORE)
+      const req = store.get(id)
+      req.onsuccess = () => resolve(req.result?.contentHtml || null)
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+const deleteSnapshotContentFromIdb = async (id: string) => {
+  const db = await openSnapshotDb()
+  if (!db) return
+  try {
+    const tx = db.transaction(DB_STORE, 'readwrite')
+    tx.objectStore(DB_STORE).delete(id)
+  } catch {}
+}
+
+const saveSnapshotsMetaToStorage = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const metaList = snapshots.value.map(s => ({
+      id: s.id,
+      url: s.url,
+      title: s.title,
+      description: s.description,
+      siteName: s.siteName,
+      coverImage: s.coverImage,
+      wordCount: s.wordCount,
+      createdAt: s.createdAt
+    }))
+    localStorage.setItem(STORAGE_KEY_SNAPSHOTS_META, JSON.stringify(metaList))
+  } catch (e: any) {
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+      throw new Error('浏览器本地存储空间已满，请清理部分旧快照')
+    }
+    console.error('Failed to save snapshots meta', e)
+  }
+}
+
+const loadSnapshotsFromStorage = async () => {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SNAPSHOTS_META)
+    if (raw) {
+      const metaList = JSON.parse(raw) as SnapshotItem[]
+      snapshots.value = metaList.map(m => ({ ...m, contentHtml: m.contentHtml || '' }))
+    }
+  } catch (e) {
+    console.error('Failed to load snapshots meta', e)
+  } finally {
+    isSnapshotsLoaded.value = true
+  }
+}
+
+if (typeof window !== 'undefined') {
+  loadSnapshotsFromStorage()
+}
+
+export const useSnapshots = () => {
+  if (typeof window !== 'undefined' && !isSnapshotsLoaded.value) {
+    loadSnapshotsFromStorage()
+  }
+
+  const addSnapshot = async (item: SnapshotItem): Promise<SnapshotItem> => {
+    // 1. 保存大容量正文到 IndexedDB (带 Quota 异常捕获)
+    if (item.contentHtml) {
+      await saveSnapshotContentToIdb(item.id, item.contentHtml)
+    }
+
+    // 2. 更新响应式状态与元数据缓存
+    const existingIdx = snapshots.value.findIndex(s => s.id === item.id || normalizeUrl(s.url) === normalizeUrl(item.url))
+    if (existingIdx !== -1) {
+      snapshots.value[existingIdx] = { ...item }
+    } else {
+      snapshots.value.unshift({ ...item })
+    }
+
+    snapshots.value = [...snapshots.value]
+    saveSnapshotsMetaToStorage()
+    return item
+  }
+
+  const deleteSnapshot = async (id: string): Promise<boolean> => {
+    await deleteSnapshotContentFromIdb(id)
+    snapshots.value = snapshots.value.filter(s => s.id !== id)
+    saveSnapshotsMetaToStorage()
+    return true
+  }
+
+  const getSnapshot = async (id: string): Promise<SnapshotItem | null> => {
+    let target = snapshots.value.find(s => s.id === id)
+    if (!target && typeof window !== 'undefined') {
+      await loadSnapshotsFromStorage()
+      target = snapshots.value.find(s => s.id === id)
+    }
+    if (!target) return null
+
+    // 补齐从 IDB 读取的完整正文
+    if (!target.contentHtml) {
+      const idbHtml = await getSnapshotContentFromIdb(id)
+      if (idbHtml) {
+        target.contentHtml = idbHtml
+      }
+    }
+    return target
+  }
+
+  return {
+    snapshots,
+    isSnapshotsLoaded,
+    addSnapshot,
+    deleteSnapshot,
+    getSnapshot,
+    loadSnapshots: loadSnapshotsFromStorage
+  }
 }

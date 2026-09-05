@@ -4,10 +4,11 @@
       <!-- 弹窗头部 -->
       <div class="modal-header">
         <div class="modal-title-group">
-          <div>
-            <h3 id="ext-modal-title" class="modal-title">📂 一键导入浏览器书签</h3>
-            <p class="modal-subtitle">直接读取当前浏览器收藏夹，自主勾选或一键全部导入</p>
+          <div class="modal-title-with-icon">
+            <svg class="svg-icon modal-header-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+            <h3 id="ext-modal-title" class="modal-title">一键导入浏览器书签</h3>
           </div>
+          <p class="modal-subtitle">直接读取当前浏览器收藏夹，自主勾选或一键全部导入</p>
         </div>
         <button class="btn-flat btn-icon close-btn" title="关闭弹窗" @click="closeModal">
           <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.close"></svg>
@@ -41,6 +42,19 @@
                   />
                   <span>{{ isSearching ? `全选搜索结果 (${selectedInViewCount}/${filteredBookmarks.length})` : `全选 (${selectedBookmarkUrls.size}/${detectedBookmarks.length})` }}</span>
                 </label>
+
+                <!-- 快捷只勾选未添加书签标签按钮 -->
+                <button
+                  v-if="unimportedCount > 0"
+                  type="button"
+                  class="quick-filter-badge-btn"
+                  :class="{ 'is-active': isOnlyUnimportedSelected }"
+                  title="一键只勾选尚未添加到书签界面的新网址"
+                  @click="selectOnlyUnimported"
+                >
+                  <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.filter"></svg>
+                  <span>仅选未添加 ({{ unimportedCount }})</span>
+                </button>
               </div>
 
               <!-- 搜索过滤栏 (带一键清空叉号按钮) -->
@@ -79,7 +93,17 @@
                   @click.stop="toggleSelectBookmark(bm.url)"
                 />
                 <span class="bm-idx">#{{ idx + 1 }}</span>
-                <span v-if="bm.folder" class="bm-folder-badge" :title="`所属分类：${bm.folder}`">📁 {{ bm.folder }}</span>
+                <span v-if="bm.folder" class="bm-folder-badge" :title="`所属分类：${bm.folder}`">
+                  <svg class="svg-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+                  <span>{{ bm.folder }}</span>
+                </span>
+                <span
+                  class="bm-status-pill"
+                  :class="isBookmarkInDb(bm.url) ? 'is-saved' : 'is-new'"
+                  :title="isBookmarkInDb(bm.url) ? '此书签已在您的书签库中' : '此书签尚未添加到书签库'"
+                >
+                  {{ isBookmarkInDb(bm.url) ? '已在书签' : '未添加' }}
+                </span>
                 <span class="bm-title" :title="bm.title">{{ bm.title }}</span>
                 <span class="bm-url" :title="bm.url">{{ bm.url }}</span>
               </div>
@@ -88,22 +112,41 @@
               </div>
             </div>
 
-            <!-- 底部导入操作按钮群 -->
-            <div class="import-action-buttons-row">
-              <button
-                class="btn-primary import-btn"
-                :disabled="selectedBookmarkUrls.size === 0"
-                @click="confirmImportSelected"
-              >
-                <span>一键导入所选书签 ({{ selectedBookmarkUrls.size }} 个)</span>
-              </button>
+            <!-- 底部导入操作按钮群 (两行排布：黑色按钮在第一行，白色按钮在第二行) -->
+            <div class="import-action-buttons-group">
+              <!-- 第一行：黑色主操作按钮 -->
+              <div class="import-primary-row">
+                <button
+                  class="btn-primary import-btn"
+                  :disabled="selectedBookmarkUrls.size === 0"
+                  @click="confirmImportSelected"
+                >
+                  <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bookmark"></svg>
+                  <span>一键导入所选书签 ({{ selectedBookmarkUrls.size }} 个)</span>
+                </button>
 
-              <button
-                class="btn-secondary import-btn"
-                @click="confirmImportAll"
-              >
-                <span>一键全部导入 (共 {{ detectedBookmarks.length }} 个)</span>
-              </button>
+                <!-- 导入未添加书签专属按钮 -->
+                <button
+                  v-if="unimportedCount > 0"
+                  class="btn-primary import-btn btn-import-unimported"
+                  :title="`仅导入 ${unimportedCount} 个尚未添加到书签库的网址`"
+                  @click="confirmImportUnimported"
+                >
+                  <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sparkles"></svg>
+                  <span>导入未添加的书签 ({{ unimportedCount }} 个)</span>
+                </button>
+              </div>
+
+              <!-- 第二行：白色/次要操作按钮 -->
+              <div class="import-secondary-row">
+                <button
+                  class="btn-secondary import-btn btn-import-all"
+                  @click="confirmImportAll"
+                >
+                  <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.layers"></svg>
+                  <span>一键全部导入 (共 {{ detectedBookmarks.length }} 个)</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -116,7 +159,9 @@
 
           <div class="download-hero-card">
             <div class="hero-left">
-              <span class="plugin-icon">🧩</span>
+              <span class="plugin-icon">
+                <svg class="svg-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sparkles"></svg>
+              </span>
               <div>
                 <h4 class="hero-title">墨萃-InkGist (浏览器官方扩展)</h4>
                 <p class="hero-desc">获得官方授权，秒级一键直接读取当前浏览器的完整书签收藏夹！</p>
@@ -172,9 +217,13 @@
 
           <!-- 备用选项：无需插件，直接导入 HTML 书签文件 -->
           <div class="fallback-import-row">
-            <span class="fallback-tip">💡 不想安装插件？您也可以直接选择浏览器导出的书签文件：</span>
+            <span class="fallback-tip">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sparkles"></svg>
+              <span>不想安装插件？您也可以直接选择浏览器导出的书签文件：</span>
+            </span>
             <button class="btn-secondary btn-sm" @click="triggerHtmlFileInput">
-              <span>📂 选择 bookmarks.html 文件导入</span>
+              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.folder"></svg>
+              <span>选择 bookmarks.html 文件导入</span>
             </button>
             <input
               ref="fileInputRef"
@@ -205,7 +254,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ICONS } from '../pages/state'
+import { ICONS, useBookmarks, normalizeUrl } from '../pages/state'
 import { parseBookmarkHtml } from '../utils/bookmark-io'
 
 export interface ImportedBookmarkItem {
@@ -226,6 +275,8 @@ const emit = defineEmits<{
   (e: 'import-bookmarks', items: ImportedBookmarkItem[]): void
 }>()
 
+const { bookmarks } = useBookmarks()
+
 const isExtensionInstalled = ref(false)
 const importSource = ref<'extension' | 'html' | null>(null)
 const isLoadingBookmarks = ref(false)
@@ -235,6 +286,40 @@ const searchFilter = ref('')
 const hasDownloaded = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const connectionNotice = ref('')
+
+// 已在书签库中的规范化 URL 集合
+const existingBookmarkNormSet = computed(() => {
+  const set = new Set<string>()
+  for (const b of bookmarks.value) {
+    const n = normalizeUrl(b.url)
+    if (n) set.add(n)
+  }
+  return set
+})
+
+// 判断书签是否已存在于书签库中
+const isBookmarkInDb = (url: string) => {
+  return existingBookmarkNormSet.value.has(normalizeUrl(url))
+}
+
+// 尚未入库的书签列表与统计
+const unimportedBookmarks = computed(() => {
+  return detectedBookmarks.value.filter((b) => !isBookmarkInDb(b.url))
+})
+
+const unimportedCount = computed(() => unimportedBookmarks.value.length)
+
+// 是否当前恰好勾选了全部未添加的书签
+const isOnlyUnimportedSelected = computed(() => {
+  if (unimportedCount.value === 0 || selectedBookmarkUrls.value.size !== unimportedCount.value) return false
+  return unimportedBookmarks.value.every((b) => selectedBookmarkUrls.value.has(b.url))
+})
+
+// 一键只勾选未入库的书签
+const selectOnlyUnimported = () => {
+  const unimportedUrls = new Set(unimportedBookmarks.value.map((b) => b.url))
+  selectedBookmarkUrls.value = unimportedUrls
+}
 
 const closeModal = () => {
   emit('update:modelValue', false)
@@ -442,6 +527,13 @@ const confirmImportSelected = () => {
   closeModal()
 }
 
+// 专属功能：仅导入尚未添加到书签界面的书签
+const confirmImportUnimported = () => {
+  if (unimportedBookmarks.value.length === 0) return
+  emit('import-bookmarks', unimportedBookmarks.value)
+  closeModal()
+}
+
 const confirmImportAll = () => {
   if (detectedBookmarks.value.length === 0) return
   emit('import-bookmarks', detectedBookmarks.value)
@@ -490,7 +582,78 @@ const parseHtmlBookmarks = (html: string) => {
 </script>
 
 <style scoped>
+.modal-title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modal-header-svg {
+  color: var(--text-main);
+  flex-shrink: 0;
+}
+
+.quick-filter-badge-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-filter-badge-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-strong);
+  background-color: var(--bg-surface-hover);
+}
+
+.quick-filter-badge-btn.is-active {
+  background-color: var(--text-main);
+  color: var(--bg-app);
+  border-color: var(--text-main);
+}
+
+.bm-status-pill {
+  font-size: 0.6875rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.bm-status-pill.is-saved {
+  background-color: rgba(100, 116, 139, 0.12);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.bm-status-pill.is-new {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.btn-import-unimported {
+  background-color: var(--text-main);
+  color: var(--bg-app);
+  border: 1px solid var(--text-main);
+}
+.btn-import-unimported:hover {
+  opacity: 0.92;
+}
+
 .bm-folder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.6875rem;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -926,19 +1089,45 @@ const parseHtmlBookmarks = (html: string) => {
   font-size: 0.8125rem;
 }
 
-.import-action-buttons-row {
+.import-action-buttons-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.import-primary-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  flex-shrink: 0;
+  width: 100%;
+}
+
+.import-primary-row .import-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.import-secondary-row {
+  display: flex;
+  width: 100%;
+}
+
+.import-secondary-row .import-btn {
+  width: 100%;
+  flex: 1;
 }
 
 .import-btn {
-  flex: 1;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  gap: 0.45rem;
   padding: 0.55rem 1rem;
   font-size: 0.8125rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .empty-state-box {
@@ -1009,9 +1198,14 @@ const parseHtmlBookmarks = (html: string) => {
     min-width: 140px;
     max-width: none;
   }
-  .import-action-buttons-row {
+  .import-primary-row {
     flex-direction: column;
     gap: 0.5rem;
+    width: 100%;
+  }
+  .import-primary-row .import-btn {
+    width: 100%;
+    flex: 1 1 100%;
   }
   .modal-footer {
     padding: 0.6rem 1rem;
