@@ -43,6 +43,46 @@
           </div>
         </div>
 
+        <!-- Karakeep 直连配置卡片 (仅当选择 Karakeep 时显示) -->
+        <div v-if="exportFormat === 'karakeep'" class="karakeep-config-card">
+          <div class="karakeep-config-header">
+            <span class="karakeep-badge-title">⚙️ Karakeep / Hoarder 实例配置</span>
+            <button
+              type="button"
+              class="btn-test-conn"
+              :disabled="isTestingKarakeep || !karakeepApiKey.trim()"
+              @click="handleTestKarakeepConnection"
+            >
+              {{ isTestingKarakeep ? '测试中...' : '测试连接' }}
+            </button>
+          </div>
+
+          <div class="karakeep-fields-group">
+            <div class="field-item">
+              <label class="field-label">实例地址 (支持官方云端或自建局域网)：</label>
+              <input
+                v-model="karakeepUrl"
+                type="text"
+                class="karakeep-input"
+                placeholder="https://cloud.karakeep.app 或 http://192.168.x.x:3000"
+              />
+            </div>
+            <div class="field-item">
+              <label class="field-label">API Key (在 Karakeep 设置中生成)：</label>
+              <input
+                v-model="karakeepApiKey"
+                type="password"
+                class="karakeep-input"
+                placeholder="输入你的 Karakeep API Key..."
+              />
+            </div>
+          </div>
+
+          <div v-if="karakeepTestMsg" class="karakeep-status-pill" :class="isKarakeepConnected ? 'is-ok' : 'is-err'">
+            {{ karakeepTestMsg }}
+          </div>
+        </div>
+
         <!-- 导出范围选择：全部 vs 自定义 -->
         <div class="export-scope-section">
           <label class="form-label">同步/导出范围：</label>
@@ -219,7 +259,7 @@ const customSearchFilter = ref('')
 const customSelectedBookmarkIds = ref<Set<string>>(new Set())
 
 // Karakeep 直连同步配置状态
-const karakeepUrl = ref('http://localhost:3000')
+const karakeepUrl = ref('https://cloud.karakeep.app')
 const karakeepApiKey = ref('')
 const isTestingKarakeep = ref(false)
 const isKarakeepConnected = ref(false)
@@ -235,6 +275,12 @@ if (typeof window !== 'undefined') {
     if (savedKey) karakeepApiKey.value = savedKey
   } catch {}
 }
+watch([karakeepUrl, karakeepApiKey], ([url, key]) => {
+  if (typeof window !== 'undefined') {
+    if (url) localStorage.setItem('inkgist_karakeep_url', url.trim())
+    if (key !== undefined) localStorage.setItem('inkgist_karakeep_key', key.trim())
+  }
+})
 
 const handleTestKarakeepConnection = async () => {
   if (!karakeepUrl.value.trim() || !karakeepApiKey.value.trim()) return
@@ -434,7 +480,7 @@ const handleExport = async () => {
   const list = targetBookmarks.value
   if (list.length === 0) return
 
-  // Karakeep API 直连同步 (直接调用服务端 .env 配置)
+  // Karakeep API 直连同步
   if (exportFormat.value === 'karakeep') {
     isSyncingKarakeep.value = true
 
@@ -443,11 +489,17 @@ const handleExport = async () => {
         method: 'POST',
         body: {
           action: 'sync',
-          bookmarks: list
+          bookmarks: list,
+          instanceUrl: karakeepUrl.value.trim(),
+          apiKey: karakeepApiKey.value.trim()
         }
       })
 
       if (res && res.success && res.syncedCount > 0) {
+        if (typeof window !== 'undefined') {
+          if (karakeepUrl.value.trim()) localStorage.setItem('inkgist_karakeep_url', karakeepUrl.value.trim())
+          if (karakeepApiKey.value.trim()) localStorage.setItem('inkgist_karakeep_key', karakeepApiKey.value.trim())
+        }
         if (deleteAfterExport.value) {
           for (const bm of list) {
             if (bm.id) await deleteBookmark(bm.id)
@@ -458,10 +510,10 @@ const handleExport = async () => {
         closeModal()
       } else {
         const errorDetail = res?.error || (res?.errors && res.errors[0]?.error) || '未能成功将书签写入 Karakeep 实例'
-        alert(`❌ 同步未完成: ${errorDetail}\n\n💡 提示：请确认已在项目根目录的 .env 文件中填入有效的 KARAKEEP_API_KEY！`)
+        alert(`❌ 同步未完成：${errorDetail}\n\n💡 提示：请检查上方填写的 Karakeep API Key 或实例地址是否正确！`)
       }
     } catch (e: any) {
-      alert(`❌ 同步请求失败: ${e?.data?.statusMessage || e.message || '请检查 .env 中的 KARAKEEP_API_KEY 配置'}`)
+      alert(`❌ 同步请求失败：${e?.data?.statusMessage || e.message || '请检查 Karakeep API Key 或网络连接'}`)
     } finally {
       isSyncingKarakeep.value = false
     }
@@ -784,37 +836,6 @@ const handleExport = async () => {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
   border: 1px solid rgba(239, 68, 68, 0.35);
-}
-
-.karakeep-mapping-hint {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  padding: 0.5rem 0.65rem;
-  border-radius: 6px;
-}
-
-.mapping-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.mapping-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.map-tag {
-  font-size: 0.6875rem;
-  background: var(--bg-surface-subtle);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  padding: 0.1rem 0.35rem;
-  color: var(--text-muted);
 }
 
 .syncing-indicator {
