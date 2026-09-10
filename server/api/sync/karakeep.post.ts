@@ -6,9 +6,9 @@ export default defineEventHandler(async (event) => {
   const { action = 'sync', bookmarks } = body || {}
   const config = useRuntimeConfig(event)
 
-  // 优先取传参，若未传则直接读取 runtimeConfig / .env 环境变量
-  const rawUrl = body?.instanceUrl || config.karakeepInstanceUrl || process.env.KARAKEEP_INSTANCE_URL || 'https://cloud.karakeep.app'
-  const rawKey = body?.apiKey || config.karakeepApiKey || process.env.KARAKEEP_API_KEY
+  // 优先取传参，若未传则读取 runtimeConfig 配置 (Nuxt 自动载入 .env)
+  const rawUrl = body?.instanceUrl || config.karakeepInstanceUrl || 'https://cloud.karakeep.app'
+  const rawKey = body?.apiKey || config.karakeepApiKey
 
   if (!rawKey || !String(rawKey).trim()) {
     throw createError({
