@@ -1,7 +1,84 @@
 import { defineEventHandler, readBody, createError } from 'h3'
 import { parseBookmarkToKarakeepPayload } from '../../utils/summary-parser'
+import { checkRateLimit, getClientIp, getAuthenticatedUser } from '../../utils'
+
+// 高危/非 Web 系统端口黑名单 (防止 SSRF 扫描内部基础设施)
+const DANGEROUS_PORTS = new Set([
+  21, 22, 23, 25, 53, 69, 110, 111, 135, 137, 138, 139, 143, 389, 445,
+  1433, 1521, 2049, 2375, 2376, 3306, 5432, 5900, 6379, 9200, 11211, 27017
+])
+
+// 受限元数据主机 (防止云服务器元数据泄露)
+const RESTRICTED_HOSTS = new Set([
+  '169.254.169.254',
+  'metadata.google.internal',
+  '100.100.100.200',
+  '0.0.0.0',
+  '::'
+])
+
+function sanitizeAndValidateKarakeepUrl(rawUrl: string): { valid: boolean; normalizedUrl: string; error?: string } {
+  let clean = (rawUrl || '').trim()
+  if (!clean) {
+    return { valid: false, normalizedUrl: '', error: '请输入有效的 Karakeep 实例地址' }
+  }
+
+  // CRLF 注入防护：禁止包含换行符或不可见控制字符
+  if (/[\r\n\x00-\x1F\x7F]/.test(clean)) {
+    return { valid: false, normalizedUrl: '', error: '实例地址包含非法字符' }
+  }
+
+  // 检查是否包含协议头；若包含非 HTTP/HTTPS 协议则直接拦截
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(clean)) {
+    if (!/^https?:\/\//i.test(clean)) {
+      return { valid: false, normalizedUrl: '', error: '仅支持 HTTP 或 HTTPS 协议' }
+    }
+  } else {
+    clean = 'https://' + clean
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(clean)
+  } catch {
+    return { valid: false, normalizedUrl: '', error: '实例地址格式不合法' }
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, normalizedUrl: '', error: '仅支持 HTTP 或 HTTPS 协议' }
+  }
+
+  const hostname = parsed.hostname.toLowerCase().trim()
+  if (!hostname || RESTRICTED_HOSTS.has(hostname) || hostname.endsWith('.internal')) {
+    return { valid: false, normalizedUrl: '', error: '禁止访问受限的主机或云元数据服务' }
+  }
+
+  if (parsed.port) {
+    const portNum = parseInt(parsed.port, 10)
+    if (DANGEROUS_PORTS.has(portNum)) {
+      return { valid: false, normalizedUrl: '', error: `端口 ${portNum} 为受限服务端口，禁止连接` }
+    }
+  }
+
+  let normalized = `${parsed.protocol}//${parsed.host}${parsed.pathname}`
+    .replace(/\/dashboard.*$/i, '')
+    .replace(/\/api.*$/i, '')
+    .replace(/\/+$/, '')
+
+  return { valid: true, normalizedUrl: normalized }
+}
 
 export default defineEventHandler(async (event) => {
+  // 1. 请求频率安全限流 (按 IP 限流，防止暴力探针或代理滥用)
+  const clientIp = getClientIp(event)
+  const rateCheck = checkRateLimit(`karakeep_${clientIp}`, 120, 60 * 1000)
+  if (!rateCheck.allowed) {
+    throw createError({
+      statusCode: 429,
+      statusMessage: `Karakeep 请求过于频繁，请在 ${Math.ceil(rateCheck.resetMs / 1000)} 秒后再试`
+    })
+  }
+
   const body = await readBody(event).catch(() => ({}))
   const { action = 'sync', bookmarks } = body || {}
   const config = useRuntimeConfig(event)
@@ -10,25 +87,25 @@ export default defineEventHandler(async (event) => {
   const rawUrl = body?.instanceUrl || config.karakeepInstanceUrl || 'https://cloud.karakeep.app'
   const rawKey = body?.apiKey || config.karakeepApiKey
 
-  if (!rawKey || !String(rawKey).trim()) {
+  if (!rawKey || typeof rawKey !== 'string' || !rawKey.trim()) {
     throw createError({
       statusCode: 400,
-      statusMessage: '未检测到 Karakeep API Key，请在项目根目录的 .env 文件中配置 KARAKEEP_API_KEY 后重试！'
+      statusMessage: '未检测到有效的 Karakeep API Key，请配置后重试！'
     })
   }
 
-  // 1. 标准化 Karakeep 服务端 URL (自动补全 https://，去除 /dashboard、/api 或尾部斜杠)
-  let normalizedUrl = String(rawUrl).trim()
-  if (!/^https?:\/\//i.test(normalizedUrl)) {
-    normalizedUrl = 'https://' + normalizedUrl
+  // 2. SSRF 安全校验与标准化 Karakeep 服务端 URL
+  const urlValidation = sanitizeAndValidateKarakeepUrl(String(rawUrl))
+  if (!urlValidation.valid) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: urlValidation.error || '无效的 Karakeep 实例地址'
+    })
   }
-  normalizedUrl = normalizedUrl
-    .replace(/\/dashboard.*$/i, '')
-    .replace(/\/api.*$/i, '')
-    .replace(/\/+$/, '')
+  const normalizedUrl = urlValidation.normalizedUrl
 
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${String(rawKey).trim()}`,
+    'Authorization': `Bearer ${rawKey.trim()}`,
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   }

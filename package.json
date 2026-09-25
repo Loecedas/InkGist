@@ -9,6 +9,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "sync": "git pull --ff-only origin main",
     "postinstall": "nuxt prepare",
     "test": "node --experimental-strip-types tests/test-suite.mjs"
   },

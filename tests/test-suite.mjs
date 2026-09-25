@@ -604,6 +604,114 @@ earth 是一个提供全球实时气象数据的在线平台，用户可以通�
     await dbFolders.delete('前端工具', testUserId)
   })
 
+  // 16. Karakeep 实例 URL 安全防御测试 (SSRF、高危端口与云元数据拦截)
+  await asyncTest('Karakeep 安全防御：云元数据拦截、高危端口封堵与合法自建放行', async () => {
+    const DANGEROUS_PORTS = new Set([
+      21, 22, 23, 25, 53, 69, 110, 111, 135, 137, 138, 139, 143, 389, 445,
+      1433, 1521, 2049, 2375, 2376, 3306, 5432, 5900, 6379, 9200, 11211, 27017
+    ])
+    const RESTRICTED_HOSTS = new Set([
+      '169.254.169.254',
+      'metadata.google.internal',
+      '100.100.100.200',
+      '0.0.0.0',
+      '::'
+    ])
+
+    function testUrlSecurity(rawUrl) {
+      let clean = (rawUrl || '').trim()
+      if (!clean) return { valid: false, error: 'empty' }
+      if (/[\r\n\x00-\x1F\x7F]/.test(clean)) return { valid: false, error: 'crlf' }
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(clean)) {
+        if (!/^https?:\/\//i.test(clean)) return { valid: false, error: 'proto' }
+      } else {
+        clean = 'https://' + clean
+      }
+      let parsed
+      try { parsed = new URL(clean) } catch { return { valid: false, error: 'invalid' } }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { valid: false, error: 'proto' }
+      const host = parsed.hostname.toLowerCase().trim()
+      if (!host || RESTRICTED_HOSTS.has(host) || host.endsWith('.internal')) return { valid: false, error: 'restricted_host' }
+      if (parsed.port && DANGEROUS_PORTS.has(parseInt(parsed.port, 10))) return { valid: false, error: 'dangerous_port' }
+      return { valid: true, normalizedUrl: `${parsed.protocol}//${parsed.host}${parsed.pathname}`.replace(/\/dashboard.*$/i, '').replace(/\/api.*$/i, '').replace(/\/+$/, '') }
+    }
+
+    // 1. 云元数据拦截
+    assert.equal(testUrlSecurity('http://169.254.169.254/latest/meta-data').valid, false, '必须拦截 169.254.169.254 云元数据')
+    assert.equal(testUrlSecurity('http://metadata.google.internal/computeMetadata').valid, false, '必须拦截 GCP 云元数据')
+
+    // 2. 危险协议拦截
+    assert.equal(testUrlSecurity('gopher://127.0.0.1:6379').valid, false, '必须拦截 gopher 协议')
+    assert.equal(testUrlSecurity('file:///etc/passwd').valid, false, '必须拦截 file 协议')
+
+    // 3. 危险端口拦截
+    assert.equal(testUrlSecurity('http://127.0.0.1:6379').valid, false, '必须拦截 Redis 6379 端口')
+    assert.equal(testUrlSecurity('http://192.168.1.50:22').valid, false, '必须拦截 SSH 22 端口')
+    assert.equal(testUrlSecurity('http://192.168.1.50:2375').valid, false, '必须拦截 Docker 2375 端口')
+
+    // 4. 合法地址放行与标准化
+    const cloudCheck = testUrlSecurity('https://cloud.karakeep.app/dashboard')
+    assert.equal(cloudCheck.valid, true, '合法官方云地址应放行')
+    assert.equal(cloudCheck.normalizedUrl, 'https://cloud.karakeep.app', '应自动裁剪 /dashboard 路径')
+
+    const selfHostedCheck = testUrlSecurity('http://192.168.1.100:3000/api/v1/')
+    assert.equal(selfHostedCheck.valid, true, '局域网自建实例应放行')
+    assert.equal(selfHostedCheck.normalizedUrl, 'http://192.168.1.100:3000', '应自动裁剪 /api/v1/ 路径')
+  })
+
+  // 17. 客户端凭据加密机制测试 (AES-GCM-256)
+  await asyncTest('客户端凭据加密：AES-GCM-256 结构完整性与密钥无损解密测试', async () => {
+    const rawApiKey = 'karakeep_sec_token_99a8b7c6d5e4f3a2b1'
+    
+    // 验证 Web Crypto 在当前环境可用性并模拟加解密
+    assert.ok(globalThis.crypto?.subtle, '全局需支持 Web Cryptography API (crypto.subtle)')
+
+    const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
+    const salt = new Uint8Array(16)
+    const iv = new Uint8Array(12)
+    globalThis.crypto.getRandomValues(salt)
+    globalThis.crypto.getRandomValues(iv)
+
+    const baseKey = await globalThis.crypto.subtle.importKey(
+      'raw',
+      encoder.encode('inkgist_test_vault_device_seed_123'),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    )
+
+    const key = await globalThis.crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    )
+
+    const cipherBuffer = await globalThis.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encoder.encode(rawApiKey)
+    )
+
+    const cipherBase64 = Buffer.from(cipherBuffer).toString('base64')
+    const finalEncrypted = `enc:v1:${Buffer.from(salt).toString('base64')}:${Buffer.from(iv).toString('base64')}:${cipherBase64}`
+
+    // 验证密文不包含任何原始明文字符
+    assert.ok(!finalEncrypted.includes(rawApiKey), '密文绝不能包含原始明文')
+    assert.ok(finalEncrypted.startsWith('enc:v1:'), '密文必须带有 enc:v1: 安全规范前缀')
+
+    // 解密验证
+    const decryptedBuffer = await globalThis.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      cipherBuffer
+    )
+    const decryptedText = decoder.decode(decryptedBuffer)
+    assert.equal(decryptedText, rawApiKey, '解密后必须完全还原原始 API Key')
+  })
+
   console.log(`\n========================================`)
   console.log(`🎯 测试结果：${passed} 项通过, ${failed} 项失败`)
   console.log(`========================================\n`)

@@ -68,13 +68,31 @@
               />
             </div>
             <div class="field-item">
-              <label class="field-label">API Key (在 Karakeep 设置中生成)：</label>
-              <input
-                v-model="karakeepApiKey"
-                type="password"
-                class="karakeep-input"
-                placeholder="输入你的 Karakeep API Key..."
-              />
+              <div class="field-label-row">
+                <label class="field-label">API Key (在 Karakeep 设置中生成)：</label>
+                <span class="field-security-badge" title="本地使用 Web Cryptography API (AES-GCM-256) 设备绑定加密存储，绝不存明文">
+                  <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" v-html="ICON_LOCK"></svg>
+                  <span>本地加密存储</span>
+                </span>
+              </div>
+              <div class="input-with-action">
+                <input
+                  v-model="karakeepApiKey"
+                  :type="showApiKey ? 'text' : 'password'"
+                  class="karakeep-input with-toggle-btn"
+                  placeholder="输入你的 Karakeep API Key..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button
+                  type="button"
+                  class="btn-input-icon"
+                  :title="showApiKey ? '隐藏密钥' : '显示密钥'"
+                  @click="showApiKey = !showApiKey"
+                >
+                  <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="showApiKey ? ICON_EYE_OFF : ICON_EYE"></svg>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -234,8 +252,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { ICONS, useBookmarks, type Bookmark } from '../pages/state'
+import { ICONS, useBookmarks, getAuthHeaders, type Bookmark } from '../pages/state'
 import { downloadBookmarksAsHtml } from '../utils/bookmark-io'
+import { loadSecureSecret, saveSecureSecret, removeSecureSecret } from '../utils/client-crypto'
+
+const ICON_LOCK = '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>'
+const ICON_EYE = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>'
+const ICON_EYE_OFF = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>'
 
 const props = defineProps<{
   modelValue: boolean
@@ -259,26 +282,42 @@ const customSearchFilter = ref('')
 const customSelectedBookmarkIds = ref<Set<string>>(new Set())
 
 // Karakeep 直连同步配置状态
+const STORAGE_KEY_URL = 'inkgist_karakeep_url'
+const STORAGE_KEY_KEY_ENC = 'inkgist_karakeep_key_enc'
+const STORAGE_KEY_KEY_LEGACY = 'inkgist_karakeep_key'
+
 const karakeepUrl = ref('https://cloud.karakeep.app')
 const karakeepApiKey = ref('')
+const showApiKey = ref(false)
 const isTestingKarakeep = ref(false)
 const isKarakeepConnected = ref(false)
 const karakeepTestMsg = ref('')
 const isSyncingKarakeep = ref(false)
 
-// 读取本地持久化记忆的 Karakeep 配置
+// 读取本地持久化配置 (API Key 采用 Web Crypto AES-GCM-256 加密读取与无缝自动升级迁移)
 if (typeof window !== 'undefined') {
   try {
-    const savedUrl = localStorage.getItem('inkgist_karakeep_url')
+    const savedUrl = localStorage.getItem(STORAGE_KEY_URL)
     if (savedUrl) karakeepUrl.value = savedUrl
-    const savedKey = localStorage.getItem('inkgist_karakeep_key')
-    if (savedKey) karakeepApiKey.value = savedKey
+    loadSecureSecret(STORAGE_KEY_KEY_ENC, STORAGE_KEY_KEY_LEGACY).then(decrypted => {
+      if (decrypted) karakeepApiKey.value = decrypted
+    })
   } catch {}
 }
+
+let saveTimer: any = null
 watch([karakeepUrl, karakeepApiKey], ([url, key]) => {
   if (typeof window !== 'undefined') {
-    if (url) localStorage.setItem('inkgist_karakeep_url', url.trim())
-    if (key !== undefined) localStorage.setItem('inkgist_karakeep_key', key.trim())
+    if (url) localStorage.setItem(STORAGE_KEY_URL, url.trim())
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(async () => {
+      const cleanKey = (key || '').trim()
+      if (cleanKey) {
+        await saveSecureSecret(STORAGE_KEY_KEY_ENC, cleanKey, STORAGE_KEY_KEY_LEGACY)
+      } else {
+        removeSecureSecret(STORAGE_KEY_KEY_ENC, STORAGE_KEY_KEY_LEGACY)
+      }
+    }, 400)
   }
 })
 
@@ -291,6 +330,7 @@ const handleTestKarakeepConnection = async () => {
   try {
     const res = await $fetch<any>('/api/sync/karakeep', {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: {
         action: 'test',
         instanceUrl: karakeepUrl.value.trim(),
@@ -302,8 +342,8 @@ const handleTestKarakeepConnection = async () => {
       isKarakeepConnected.value = true
       karakeepTestMsg.value = '✅ 连接成功！已检测到在线 Karakeep 实例'
       if (typeof window !== 'undefined') {
-        localStorage.setItem('inkgist_karakeep_url', karakeepUrl.value.trim())
-        localStorage.setItem('inkgist_karakeep_key', karakeepApiKey.value.trim())
+        localStorage.setItem(STORAGE_KEY_URL, karakeepUrl.value.trim())
+        await saveSecureSecret(STORAGE_KEY_KEY_ENC, karakeepApiKey.value.trim(), STORAGE_KEY_KEY_LEGACY)
       }
     } else {
       isKarakeepConnected.value = false
@@ -487,6 +527,7 @@ const handleExport = async () => {
     try {
       const res = await $fetch<any>('/api/sync/karakeep', {
         method: 'POST',
+        headers: getAuthHeaders(),
         body: {
           action: 'sync',
           bookmarks: list,
@@ -497,8 +538,10 @@ const handleExport = async () => {
 
       if (res && res.success && res.syncedCount > 0) {
         if (typeof window !== 'undefined') {
-          if (karakeepUrl.value.trim()) localStorage.setItem('inkgist_karakeep_url', karakeepUrl.value.trim())
-          if (karakeepApiKey.value.trim()) localStorage.setItem('inkgist_karakeep_key', karakeepApiKey.value.trim())
+          if (karakeepUrl.value.trim()) localStorage.setItem(STORAGE_KEY_URL, karakeepUrl.value.trim())
+          if (karakeepApiKey.value.trim()) {
+            await saveSecureSecret(STORAGE_KEY_KEY_ENC, karakeepApiKey.value.trim(), STORAGE_KEY_KEY_LEGACY)
+          }
         }
         if (deleteAfterExport.value) {
           for (const bm of list) {
@@ -806,6 +849,34 @@ const handleExport = async () => {
   color: var(--text-muted);
 }
 
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.field-security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  user-select: none;
+}
+
+.input-with-action {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
 .karakeep-input {
   width: 100%;
   border: 1px solid var(--border-subtle);
@@ -816,9 +887,34 @@ const handleExport = async () => {
   background: var(--bg-surface);
   color: var(--text-main);
   box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.karakeep-input.with-toggle-btn {
+  padding-right: 2.25rem;
 }
 .karakeep-input:focus {
   border-color: var(--primary);
+}
+
+.btn-input-icon {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.btn-input-icon:hover {
+  color: var(--text-main);
+  background: var(--bg-surface-hover);
 }
 
 .karakeep-status-pill {
