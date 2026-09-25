@@ -87,10 +87,10 @@ export default defineEventHandler(async (event): Promise<UpdateResult> => {
     }
 
     if (!isGit) {
-      addLog('env_check', 'failed', '当前部署环境未检测到 Git 仓库，无法直接执行 Git 自动拉取更新。')
+      addLog('env_check', 'failed', '当前部署环境未检测到 Git 仓库，无法直接通过网页触发 Git 拉取。')
       return {
         success: false,
-        message: '当前非 Git 部署环境。如使用 Docker 部署，请运行 `docker compose pull && docker compose up -d` 进行更新。',
+        message: '当前运行于 Cloudflare 等边缘托管平台：只要代码推送到 GitHub，Cloudflare 就会在后台全自动构建部署，无需在此手动点击升级。',
         logs
       }
     }
