@@ -1,4 +1,13 @@
-import pkg from './package.json'
+const getCommitSha = (): string => {
+  if (process.env.CF_PAGES_COMMIT_SHA) return process.env.CF_PAGES_COMMIT_SHA.slice(0, 7)
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7)
+  try {
+    const { execSync } = require('node:child_process')
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8', timeout: 2000 }).trim()
+  } catch {
+    return ''
+  }
+}
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -42,7 +51,8 @@ export default defineNuxtConfig({
 
     public: {
       appTitle: '墨萃 InkGist',
-      appVersion: pkg.version || '1.1.0'
+      appVersion: pkg.version || '1.1.0',
+      appCommit: getCommitSha()
     }
   },
   app: {

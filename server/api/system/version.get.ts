@@ -59,12 +59,13 @@ export default defineEventHandler(async (event): Promise<VersionResponse> => {
 
   // 2. 检测本地 Git 状态 (动态导入)
   let isGitRepo = false
-  let currentCommit = ''
+  let currentCommit = (runtimeConf.public?.appCommit as string) || ''
   let branch = 'main'
   try {
     if (typeof process !== 'undefined' && process.versions && process.versions.node) {
       const { execSync } = await import('node:child_process')
-      currentCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', timeout: 3000 }).trim()
+      const gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', timeout: 3000 }).trim()
+      if (gitHash) currentCommit = gitHash
       branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8', timeout: 3000 }).trim()
       isGitRepo = true
     }
