@@ -41,8 +41,10 @@ export default defineEventHandler(async (event): Promise<VersionResponse> => {
     return cachedResult
   }
 
-  // 1. 读取本地当前项目版本 (动态导入以兼容边缘环境)
-  let currentVersion = '1.0.0'
+  // 1. 读取当前项目版本 (优先从构建时内联的 runtimeConfig 读取，完美适配 Cloudflare 边缘环境)
+  const runtimeConf = useRuntimeConfig(event)
+  let currentVersion = (runtimeConf.public?.appVersion as string) || '1.1.0'
+
   try {
     if (typeof process !== 'undefined' && process.versions && process.versions.node) {
       const { readFileSync, existsSync } = await import('node:fs')
@@ -71,7 +73,7 @@ export default defineEventHandler(async (event): Promise<VersionResponse> => {
   }
 
   let latestVersion = currentVersion
-  let releaseNotes = `# 墨萃 InkGist v1.0.0 正式版
+  let releaseNotes = `# 墨萃 InkGist v${currentVersion} 正式版
 
 > 墨萃 InkGist — 轻量高颜值 AI 网页智能速读、像素级离线快照与多层级书签管理平台
 

@@ -5,6 +5,8 @@
 .nitro
 .cache
 dist
+release/
+release/*
 
 # Node.js 依赖包
 node_modules

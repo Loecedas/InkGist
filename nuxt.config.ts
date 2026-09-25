@@ -1,3 +1,5 @@
+import pkg from './package.json'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   ssr: false,
@@ -39,7 +41,8 @@ export default defineNuxtConfig({
     aiModel: process.env.AI_MODEL || '',
 
     public: {
-      appTitle: '墨萃 InkGist'
+      appTitle: '墨萃 InkGist',
+      appVersion: pkg.version || '1.1.0'
     }
   },
   app: {

@@ -23,10 +23,20 @@ export interface UpdateLogItem {
   timestamp: string
 }
 
+// 获取内联应用版本
+function getBuildAppVersion(): string {
+  try {
+    const config = useRuntimeConfig()
+    return (config.public?.appVersion as string) || '1.1.0'
+  } catch {
+    return '1.1.0'
+  }
+}
+
 // 全局单例响应式状态
 const versionInfo = ref<VersionInfo>({
-  currentVersion: '1.0.0',
-  latestVersion: '1.0.0',
+  currentVersion: getBuildAppVersion(),
+  latestVersion: getBuildAppVersion(),
   hasUpdate: false,
   releaseNotes: '',
   releaseUrl: 'https://github.com/Loecedas/InkGist/releases',

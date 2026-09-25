@@ -12,9 +12,9 @@ const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-
 const version = pkg.version || '1.1.0'
 const versionTag = version.startsWith('v') ? version : `v${version}`
 
-// 每次发布新版本均在 release 目录下以版本号新建独立子文件夹 (如 dist/release/v1.1.0/)
-const releaseDir = path.join(rootDir, 'dist', 'release', versionTag)
-const tempDir = path.join(rootDir, 'dist', 'temp_pkg')
+// 每次发布新版本均在本地项目根目录下的 release 目录以版本号新建独立文件夹 (如 release/v1.1.0/)
+const releaseDir = path.join(rootDir, 'release', versionTag)
+const tempDir = path.join(rootDir, '.temp_pkg')
 
 if (fs.existsSync(releaseDir)) fs.rmSync(releaseDir, { recursive: true, force: true })
 if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true })
@@ -44,12 +44,7 @@ if (fs.existsSync(path.join(rootDir, 'LICENSE'))) {
 }
 
 const zipFileName = `inkgist-${versionTag}-standalone.zip`
-const tarFileName = `inkgist-${versionTag}-standalone.tar.gz`
 const zipPath = path.join(releaseDir, zipFileName)
-const tarPath = path.join(releaseDir, tarFileName)
-
-console.log(`Generating tar.gz archive (${tarFileName})...`)
-execSync(`tar -czf "${tarPath}" -C "${tempDir}" .`)
 
 console.log(`Generating zip archive (${zipFileName})...`)
 execSync(`tar -a -c -f "${zipPath}" -C "${tempDir}" *`)
@@ -77,7 +72,6 @@ for (const file of releaseFiles) {
 }
 
 const checksumText = checksumLines.join('\n') + '\n'
-fs.writeFileSync(path.join(releaseDir, '校验和.txt'), checksumText, 'utf8')
 fs.writeFileSync(path.join(releaseDir, 'checksums.txt'), checksumText, 'utf8')
 
 // 生成配套的 GitHub Release 版本说明
@@ -122,7 +116,7 @@ fs.writeFileSync(path.join(releaseDir, 'release-notes.md'), releaseNotesContent,
 
 fs.rmSync(tempDir, { recursive: true, force: true })
 
-console.log(`Done! Release package files generated successfully in: dist/release/${versionTag}/`)
+console.log(`Done! Release package files generated successfully in: release/${versionTag}/`)
 const files = fs.readdirSync(releaseDir)
 for (const file of files) {
   const stat = fs.statSync(path.join(releaseDir, file))
