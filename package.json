@@ -1,11 +1,12 @@
 {
   "name": "inkgist",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "private": true,
   "scripts": {
     "build": "nuxt build",
-    "build:node": "NITRO_PRESET=node-server nuxt build",
+    "build:node": "node -e \"process.env.NITRO_PRESET='node-server'; require('child_process').execSync('npx nuxt build', {stdio: 'inherit', env: process.env})\"",
+    "build:release": "node scripts/build-release.js",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",

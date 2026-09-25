@@ -38,25 +38,43 @@ if (fs.existsSync(path.join(rootDir, 'LICENSE'))) {
   copyRecursive(path.join(rootDir, 'LICENSE'), path.join(tempDir, 'LICENSE'))
 }
 
-const zipPath = path.join(releaseDir, 'inkgist-v1.0.0-standalone.zip')
-const tarPath = path.join(releaseDir, 'inkgist-v1.0.0-standalone.tar.gz')
+const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'))
+const version = pkg.version || '1.1.0'
 
-console.log('Generating tar.gz archive...')
+const zipFileName = `inkgist-v${version}-standalone.zip`
+const tarFileName = `inkgist-v${version}-standalone.tar.gz`
+const zipPath = path.join(releaseDir, zipFileName)
+const tarPath = path.join(releaseDir, tarFileName)
+
+console.log(`Generating tar.gz archive (${tarFileName})...`)
 execSync(`tar -czf "${tarPath}" -C "${tempDir}" .`)
 
-console.log('Generating zip archive...')
+console.log(`Generating zip archive (${zipFileName})...`)
 execSync(`tar -a -c -f "${zipPath}" -C "${tempDir}" *`)
+
+// 复制浏览器扩展产物到 release 发布目录
+const extZipSource = path.join(rootDir, 'public', 'inkgist-bookmarks-extension.zip')
+const extCrxSource = path.join(rootDir, 'public', 'inkgist-bookmarks-assistant.crx')
+if (fs.existsSync(extZipSource)) {
+  fs.copyFileSync(extZipSource, path.join(releaseDir, 'inkgist-bookmarks-extension.zip'))
+}
+if (fs.existsSync(extCrxSource)) {
+  fs.copyFileSync(extCrxSource, path.join(releaseDir, 'inkgist-bookmarks-assistant.crx'))
+}
 
 function getSha256(filePath) {
   const data = fs.readFileSync(filePath)
   return crypto.createHash('sha256').update(data).digest('hex')
 }
 
-const zipSha = getSha256(zipPath)
-const tarSha = getSha256(tarPath)
+const checksumLines = []
+const releaseFiles = fs.readdirSync(releaseDir).filter(f => !f.endsWith('.txt'))
+for (const file of releaseFiles) {
+  const hash = getSha256(path.join(releaseDir, file))
+  checksumLines.push(`${hash}  ${file}`)
+}
 
-const checksumText = `${zipSha}  inkgist-v1.0.0-standalone.zip\n${tarSha}  inkgist-v1.0.0-standalone.tar.gz\n`
-
+const checksumText = checksumLines.join('\n') + '\n'
 fs.writeFileSync(path.join(releaseDir, '校验和.txt'), checksumText, 'utf8')
 fs.writeFileSync(path.join(releaseDir, 'checksums.txt'), checksumText, 'utf8')
 
