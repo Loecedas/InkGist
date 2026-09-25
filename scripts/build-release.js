@@ -6,9 +6,14 @@ import crypto from 'node:crypto'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
 const rootDir = path.resolve(__dirname, '..')
-const releaseDir = path.join(rootDir, 'dist', 'release')
+
+const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'))
+const version = pkg.version || '1.1.0'
+const versionTag = version.startsWith('v') ? version : `v${version}`
+
+// 每次发布新版本均在 release 目录下以版本号新建独立子文件夹 (如 dist/release/v1.1.0/)
+const releaseDir = path.join(rootDir, 'dist', 'release', versionTag)
 const tempDir = path.join(rootDir, 'dist', 'temp_pkg')
 
 if (fs.existsSync(releaseDir)) fs.rmSync(releaseDir, { recursive: true, force: true })
@@ -38,11 +43,8 @@ if (fs.existsSync(path.join(rootDir, 'LICENSE'))) {
   copyRecursive(path.join(rootDir, 'LICENSE'), path.join(tempDir, 'LICENSE'))
 }
 
-const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'))
-const version = pkg.version || '1.1.0'
-
-const zipFileName = `inkgist-v${version}-standalone.zip`
-const tarFileName = `inkgist-v${version}-standalone.tar.gz`
+const zipFileName = `inkgist-${versionTag}-standalone.zip`
+const tarFileName = `inkgist-${versionTag}-standalone.tar.gz`
 const zipPath = path.join(releaseDir, zipFileName)
 const tarPath = path.join(releaseDir, tarFileName)
 
@@ -52,7 +54,7 @@ execSync(`tar -czf "${tarPath}" -C "${tempDir}" .`)
 console.log(`Generating zip archive (${zipFileName})...`)
 execSync(`tar -a -c -f "${zipPath}" -C "${tempDir}" *`)
 
-// 复制浏览器扩展产物到 release 发布目录
+// 复制浏览器扩展产物到发布目录
 const extZipSource = path.join(rootDir, 'public', 'inkgist-bookmarks-extension.zip')
 const extCrxSource = path.join(rootDir, 'public', 'inkgist-bookmarks-assistant.crx')
 if (fs.existsSync(extZipSource)) {
@@ -68,7 +70,7 @@ function getSha256(filePath) {
 }
 
 const checksumLines = []
-const releaseFiles = fs.readdirSync(releaseDir).filter(f => !f.endsWith('.txt'))
+const releaseFiles = fs.readdirSync(releaseDir).filter(f => !f.endsWith('.txt') && !f.endsWith('.md'))
 for (const file of releaseFiles) {
   const hash = getSha256(path.join(releaseDir, file))
   checksumLines.push(`${hash}  ${file}`)
@@ -78,11 +80,52 @@ const checksumText = checksumLines.join('\n') + '\n'
 fs.writeFileSync(path.join(releaseDir, '校验和.txt'), checksumText, 'utf8')
 fs.writeFileSync(path.join(releaseDir, 'checksums.txt'), checksumText, 'utf8')
 
+// 生成配套的 GitHub Release 版本说明
+const releaseNotesContent = `# 墨萃 InkGist ${versionTag} 正式版发布 (Release Notes)
+
+> 墨萃 InkGist — 轻量高颜值 AI 网页智能速读、像素级离线快照、多层级书签管理与 Karakeep 直连同步平台。
+
+---
+
+### 🚀 核心新特性 (What's New)
+
+#### 1. 🦔 Karakeep (Hoarder) 直连同步 & 自定义实例配置
+- **多端直连互通**：支持直连同步到 Karakeep 官方云端 (\`https://cloud.karakeep.app\`) 以及私有局域网自建实例（如群晖、NAS、本地 Docker 等）。
+- **分类与标签自动映射**：同步时自动在 Karakeep 中检索或创建对应 Lists 目录，精准映射「一句话核心概括」与「关键功能说明」。
+- **一键测试连接**：同步弹窗内置网络连通性与 API Key 有效性即时测试探测。
+
+#### 2. 🔒 工业级客户端 Web Crypto 凭据加密引擎 (Security Hardening)
+- **拒绝明码存储**：前端输入 Karakeep API Key 后，采用浏览器原生 **Web Cryptography API (AES-GCM-256)** 结合本地设备种子与 PBKDF2（100,000 轮）动态加密存储，杜绝任何明码泄露。
+- **平滑自动迁移**：自动迁移并彻底销毁旧版本明文项；清空密钥时自动销毁本地密文。
+- **显隐眼睛切换**：密码输入框新增一键切换明暗小眼睛按钮，防误触防输错。
+
+#### 3. 🛡️ 服务端 SSRF 深度防御与端口封堵
+- **拦截云元数据探针**：服务端代理严格拦截 \`169.254.169.254\`、\`metadata.google.internal\` 等云厂商元数据地址。
+- **拦截高危敏感端口**：封锁系统与数据库非 Web 敏感端口（如 Redis 6379、SSH 22、Docker 2375 等），防止内网穿透渗透。
+- **协议白名单与 CRLF 过滤**：严格仅允许 HTTP/HTTPS 协议，杜绝回车换行走私攻击。
+- **请求限流防刷**：接口增加针对单个客户端 IP 的高频防刷安全限制。
+
+#### 4. ⚡ 自动化构建与跨平台发布工具
+- 完善跨平台 Node.js 独立发布打包工具，自动按版本独立建档生成校验和与资产附件。
+- 新增全量自动化回归测试，100% 覆盖 SSRF、加解密完整性与边界校验。
+
+---
+
+### 📦 资产校验和 (SHA-256 Checksums)
+
+\`\`\`text
+${checksumText.trim()}
+\`\`\`
+`
+
+fs.writeFileSync(path.join(releaseDir, 'release-notes.md'), releaseNotesContent, 'utf8')
+
 fs.rmSync(tempDir, { recursive: true, force: true })
 
-console.log('Done! Release package files generated successfully:')
+console.log(`Done! Release package files generated successfully in: dist/release/${versionTag}/`)
 const files = fs.readdirSync(releaseDir)
 for (const file of files) {
   const stat = fs.statSync(path.join(releaseDir, file))
   console.log(`- ${file} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`)
 }
+
