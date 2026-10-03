@@ -8,27 +8,12 @@
       </button>
     </div>
 
-    <!-- 居中登录 / 注册核心卡片 (已去除上方大图标与标题) -->
+    <!-- 居中登录核心卡片 -->
     <div class="auth-card-container">
       <div class="auth-box-card">
-        <!-- 登录 / 注册 模式切换 Tab -->
-        <div class="auth-tabs-row">
-          <button
-            type="button"
-            class="tab-btn"
-            :class="{ active: mode === 'login' }"
-            @click="switchMode('login')"
-          >
-            <span>登录</span>
-          </button>
-          <button
-            type="button"
-            class="tab-btn"
-            :class="{ active: mode === 'register' }"
-            @click="switchMode('register')"
-          >
-            <span>注册新账号</span>
-          </button>
+        <!-- 登录卡片标题 -->
+        <div class="auth-header-row">
+          <h2 class="auth-title">登录</h2>
         </div>
 
         <!-- 错误提示 -->
@@ -43,7 +28,7 @@
           <span>{{ successMsg }}</span>
         </div>
 
-        <!-- 登录/注册表单 -->
+        <!-- 登录表单 -->
         <form class="auth-form-body" @submit.prevent="handleSubmit">
           <div class="form-item">
             <label class="item-label">用户名</label>
@@ -55,7 +40,7 @@
                 v-model="username"
                 type="text"
                 class="text-input"
-                placeholder="请输入用户名 (至少2位)"
+                placeholder="请输入用户名"
                 autocomplete="username"
                 required
               />
@@ -72,7 +57,7 @@
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 class="text-input"
-                placeholder="请输入密码 (至少6位)"
+                placeholder="请输入密码"
                 autocomplete="current-password"
                 required
               />
@@ -93,20 +78,9 @@
             :disabled="loading || !username.trim() || !password"
           >
             <span v-if="loading" class="spinner-dot"></span>
-            <span>{{ loading ? '正在验证中...' : (mode === 'login' ? '立即登录并进入' : '完成注册并登录') }}</span>
+            <span>{{ loading ? '正在验证中...' : '立即登录并进入' }}</span>
           </button>
         </form>
-
-        <div class="auth-footer-tips">
-          <span v-if="mode === 'login'">
-            还没有账号？
-            <a href="javascript:void(0)" class="link-switch" @click="switchMode('register')">免费注册</a>
-          </span>
-          <span v-else>
-            已有账号？
-            <a href="javascript:void(0)" class="link-switch" @click="switchMode('login')">直接登录</a>
-          </span>
-        </div>
       </div>
     </div>
   </div>
@@ -119,7 +93,7 @@ import { useAuth, useTheme, ICONS } from './state'
 
 const router = useRouter()
 const route = useRoute()
-const { isLoggedIn, login, register, fetchCurrentUser } = useAuth()
+const { isLoggedIn, login, fetchCurrentUser } = useAuth()
 const { themeMode, cycleTheme } = useTheme()
 
 const currentIconSvg = computed(() => {
@@ -134,19 +108,12 @@ const currentLabel = computed(() => {
   return '跟随系统'
 })
 
-const mode = ref<'login' | 'register'>('login')
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 const successMsg = ref('')
-
-const switchMode = (newMode: 'login' | 'register') => {
-  mode.value = newMode
-  errorMsg.value = ''
-  successMsg.value = ''
-}
 
 const getTargetRedirectUrl = () => {
   const queryRedirect = route.query.redirect
@@ -164,31 +131,18 @@ const handleSubmit = async () => {
 
   try {
     const targetUrl = getTargetRedirectUrl()
-    if (mode.value === 'login') {
-      const ok = await login(username.value.trim(), password.value)
-      if (ok) {
-        successMsg.value = '登录成功，正在进入...'
-        setTimeout(() => {
-          window.location.href = targetUrl
-        }, 150)
-      } else {
-        const { authError } = useAuth()
-        errorMsg.value = authError.value || '登录失败，请检查用户名或密码'
-      }
+    const ok = await login(username.value.trim(), password.value)
+    if (ok) {
+      successMsg.value = '登录成功，正在进入...'
+      setTimeout(() => {
+        window.location.href = targetUrl
+      }, 150)
     } else {
-      const ok = await register(username.value.trim(), password.value)
-      if (ok) {
-        successMsg.value = '注册成功，正在进入...'
-        setTimeout(() => {
-          window.location.href = targetUrl
-        }, 150)
-      } else {
-        const { authError } = useAuth()
-        errorMsg.value = authError.value || '注册失败，该用户名可能已被占用'
-      }
+      const { authError } = useAuth()
+      errorMsg.value = authError.value || '登录失败，请检查用户名或密码'
     }
   } catch (err: any) {
-    errorMsg.value = err?.message || '操作失败，请重试'
+    errorMsg.value = err?.message || '登录失败，请重试'
   } finally {
     loading.value = false
   }
@@ -268,30 +222,22 @@ onMounted(async () => {
   gap: 1.5rem;
 }
 
-.auth-tabs-row {
+.auth-header-row {
   display: flex;
+  align-items: center;
   border-bottom: 2px solid var(--slate-100);
-  gap: 1.5rem;
 }
 
-.tab-btn {
-  background: transparent;
-  border: none;
+.auth-title {
+  margin: 0;
   font-size: 1.0625rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  padding: 0.5rem 0.25rem 0.75rem 0.25rem;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s ease;
-}
-
-.tab-btn.active {
-  color: var(--text-main);
   font-weight: 700;
+  color: var(--text-main);
+  position: relative;
+  padding: 0.25rem 0.25rem 0.75rem 0.25rem;
 }
 
-.tab-btn.active::after {
+.auth-title::after {
   content: '';
   position: absolute;
   bottom: -2px;
@@ -418,21 +364,5 @@ onMounted(async () => {
 .btn-submit-auth:disabled {
   opacity: 0.65;
   cursor: not-allowed;
-}
-
-.auth-footer-tips {
-  text-align: center;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-.link-switch {
-  color: var(--text-main);
-  font-weight: 600;
-  text-decoration: underline;
-  margin-left: 0.25rem;
-}
-.link-switch:hover {
-  color: var(--primary);
 }
 </style>

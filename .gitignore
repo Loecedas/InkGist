@@ -15,6 +15,9 @@ node_modules
 server/data/*.json
 server/data/*.db*
 server/data/*.sqlite*
+server/data/*.bak
+server/data/.secret
+server/data/*.tmp*
 
 # 日志文件
 logs

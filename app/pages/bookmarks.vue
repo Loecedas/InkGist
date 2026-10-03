@@ -437,9 +437,6 @@
     <div v-if="toastMessage" class="toast-notification-pill">
       <span>{{ toastMessage }}</span>
     </div>
-
-    <!-- 系统自动检测与在线升级弹窗 -->
-    <UpdateModal />
   </div>
 </template>
 
@@ -454,15 +451,12 @@ import MoveFolderModal from '../components/MoveFolderModal.vue'
 import MobileFolderSelectModal from '../components/MobileFolderSelectModal.vue'
 import ExportBookmarkModal from '../components/ExportBookmarkModal.vue'
 import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
-import UpdateModal from '../components/UpdateModal.vue'
 import { useAuth, useBookmarks, useTheme, ICONS, type Bookmark } from './state'
-import { useUpdater } from '../utils/updater'
 
 definePageMeta({
   keepalive: true
 })
 
-const { versionInfo, openUpdateModal, checkUpdateSilently } = useUpdater()
 const { logout } = useAuth()
 const {
   bookmarks,
@@ -2898,35 +2892,6 @@ const extractActions = (bm: Bookmark): string[] => {
   background-color: var(--primary);
   color: var(--primary-contrast);
   border-color: var(--primary);
-}
-
-.nav-update-btn-header {
-  position: relative;
-  font-weight: 600;
-}
-
-.nav-update-btn-header.has-new {
-  border-color: rgba(59, 130, 246, 0.4);
-  color: var(--primary);
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--bg-surface) 100%);
-}
-
-.update-pulse-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: #ef4444;
-  box-shadow: 0 0 0 2px var(--bg-surface);
-  animation: pulseDot 1.8s infinite;
-}
-
-@keyframes pulseDot {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 /* 底部悬浮批量管理栏 */

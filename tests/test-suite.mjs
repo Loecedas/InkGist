@@ -5,9 +5,11 @@ import {
   validateUsername,
   hashPassword,
   verifyPassword,
+  dbUsers,
   dbBookmarks,
   dbFolders
 } from '../server/utils/index.ts'
+import { getSqliteDb } from '../server/utils/sqlite-db.ts'
 import {
   generateNetscapeBookmarkHtml,
   parseBookmarkHtmlNode
@@ -710,6 +712,106 @@ earth 是一个提供全球实时气象数据的在线平台，用户可以通�
     )
     const decryptedText = decoder.decode(decryptedBuffer)
     assert.equal(decryptedText, rawApiKey, '解密后必须完全还原原始 API Key')
+  })
+
+  // 18. 数据库全字段 AES-256-GCM 强加密落盘验证
+  await asyncTest('数据库底层存储：全字段 AES-256-GCM 密文落盘与盲索引检索测试', async () => {
+    const encTestUser = 'u_enc_test_' + Date.now()
+    const testSecretTitle = '商业机密财务报表系统'
+    const testSecretUrl = 'https://finance.company-internal.corp/secret?token=xyz'
+    const testSecretSummary = '2026年度企业全链路商业机密及现金流流向分析报告'
+    const testSecretFolder = '绝密机要/财务'
+
+    const bm = {
+      id: 'bm_sec_' + Date.now(),
+      user_id: encTestUser,
+      title: testSecretTitle,
+      url: testSecretUrl,
+      folder: testSecretFolder,
+      summary: testSecretSummary,
+      tags: ['机密', '财务'],
+      created_at: new Date().toISOString()
+    }
+
+    // 写入数据库
+    await dbBookmarks.upsert(bm)
+
+    // 1. 直接绕过业务层，从 SQLite 底层磁盘物理行读取原始数据
+    const db = getSqliteDb()
+    const rawRow = db.prepare('SELECT * FROM bookmarks WHERE id = ?').get(bm.id)
+    assert.ok(rawRow, '物理数据库中必须存在该条目')
+
+    // 2. 严格断言物理落盘字段完全为 enc:v1: 密文，且绝不包含任何原始明文
+    assert.ok(rawRow.title.startsWith('enc:v1:'), '物理存储的 title 必须为 enc:v1: 格式密文')
+    assert.ok(!rawRow.title.includes(testSecretTitle), '物理存储的 title 严禁包含明文字符串')
+
+    assert.ok(rawRow.url.startsWith('enc:v1:'), '物理存储的 url 必须为 enc:v1: 格式密文')
+    assert.ok(!rawRow.url.includes('company-internal'), '物理存储的 url 严禁包含明文域名或路径')
+
+    assert.ok(rawRow.summary.startsWith('enc:v1:'), '物理存储的 summary 必须为 enc:v1: 格式密文')
+    assert.ok(!rawRow.summary.includes('商业机密'), '物理存储的 summary 严禁包含明文字符串')
+
+    assert.ok(rawRow.folder.startsWith('enc:v1:'), '物理存储的 folder 必须为 enc:v1: 格式密文')
+    assert.ok(!rawRow.folder.includes('财务'), '物理存储的 folder 严禁包含明文字符串')
+
+    // 3. 验证通过业务层读取自动完成无损解密
+    const decryptedBm = await dbBookmarks.findByUserAndUrl(encTestUser, testSecretUrl)
+    assert.ok(decryptedBm, '必须能通过 URL 盲索引准确定位到书签')
+    assert.equal(decryptedBm.title, testSecretTitle, '解密后的 title 必须完全与原文一致')
+    assert.equal(decryptedBm.url, testSecretUrl, '解密后的 url 必须完全与原文一致')
+    assert.equal(decryptedBm.summary, testSecretSummary, '解密后的 summary 必须完全与原文一致')
+    assert.equal(decryptedBm.folder, testSecretFolder, '解密后的 folder 必须完全与原文一致')
+    assert.deepEqual(decryptedBm.tags, ['机密', '财务'])
+
+    // 清理
+    await dbBookmarks.delete(bm.id, encTestUser)
+  })
+
+  // 19. 后台密码清除/重置与历史加密数据安全解耦测试
+  await asyncTest('后台密码管理：用户密码清除/重置解耦与历史数据无损保全测试', async () => {
+    const testUsername = 'test_reset_user_' + Date.now()
+    const testUserId = 'u_rst_' + Date.now()
+    const oldPassword = 'OldInitialPassword123'
+    const { hash: oldHash, salt: oldSalt } = hashPassword(oldPassword)
+
+    await dbUsers.insert({
+      id: testUserId,
+      username: testUsername,
+      password_hash: oldHash,
+      salt: oldSalt,
+      created_at: new Date().toISOString()
+    })
+
+    // 该用户保存一条加密书签
+    const bmId = 'bm_pwd_test_' + Date.now()
+    await dbBookmarks.upsert({
+      id: bmId,
+      user_id: testUserId,
+      title: '密码重置关联重要笔记',
+      url: 'https://notes.example.org/my-important-doc',
+      created_at: new Date().toISOString()
+    })
+
+    // 1. 后台操作清除用户密码 (生成临时密码)
+    const { temporaryPassword } = await dbUsers.clearPassword(testUserId)
+    assert.ok(temporaryPassword, '清除密码后应成功生成临时密码')
+    assert.ok(temporaryPassword.length >= 8, '临时密码应具备充足安全长度')
+
+    // 2. 验证旧密码已失效，临时密码有效
+    const userAfterClear = await dbUsers.findById(testUserId)
+    const oldVerify = verifyPassword(oldPassword, userAfterClear.password_hash, userAfterClear.salt)
+    assert.equal(oldVerify.valid, false, '旧密码必须已被注销失效')
+
+    const tempVerify = verifyPassword(temporaryPassword, userAfterClear.password_hash, userAfterClear.salt)
+    assert.equal(tempVerify.valid, true, '临时密码必须能够成功通过验证')
+
+    // 3. 验证密码清除/重置后，该用户已有的全部加密书签依旧完好并能正常解密
+    const userBms = await dbBookmarks.findByUser(testUserId)
+    assert.equal(userBms.length, 1)
+    assert.equal(userBms[0].title, '密码重置关联重要笔记', '重置密码后历史加密书签依旧完整解密无损')
+
+    // 清理
+    await dbBookmarks.delete(bmId, testUserId)
   })
 
   console.log(`\n========================================`)

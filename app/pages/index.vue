@@ -1,17 +1,10 @@
 <template>
   <div class="homepage-layout">
-    <!-- 左上角极简悬浮小书签与系统更新按钮 -->
+    <!-- 左上角极简悬浮小书签按钮 -->
     <div class="top-left-floating-bar">
       <button class="nav-bookmarklet-btn" title="浏览器小书签 (Bookmarklet)" @click="showBookmarkletModal = true">
         <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sparkles"></svg>
         <span>小书签</span>
-      </button>
-
-      <!-- 系统自动更新 -->
-      <button class="nav-update-btn" :class="{ 'has-new-update': versionInfo.hasUpdate }" title="系统自动更新" @click="openUpdateModal">
-        <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.sync"></svg>
-        <span>自动更新</span>
-        <span v-if="versionInfo.hasUpdate" class="update-pulse-dot" title="发现可用新版本"></span>
       </button>
     </div>
 
@@ -434,9 +427,6 @@
       @import-bookmarks="handleImportBookmarksFromExt"
     />
 
-    <!-- 系统自动检测与在线升级弹窗 -->
-    <UpdateModal />
-
     <!-- 首页全局提示 (快照生成成功提示) -->
     <Transition name="toast-fade">
       <div v-if="homepageToast" class="homepage-toast-notification">
@@ -455,10 +445,8 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth, useBookmarks, useSnapshots, useTheme, ICONS, getAuthHeaders, type SnapshotItem } from './state'
-import { useUpdater } from '../utils/updater'
 import BookmarkletModal from '../components/BookmarkletModal.vue'
 import ExtensionInstallModal from '../components/ExtensionInstallModal.vue'
-import UpdateModal from '../components/UpdateModal.vue'
 
 definePageMeta({
   keepalive: true
@@ -470,11 +458,6 @@ const { logout } = useAuth()
 const { addBookmark, bookmarks } = useBookmarks()
 const { addSnapshot } = useSnapshots()
 const { themeMode, cycleTheme } = useTheme()
-const { versionInfo, openUpdateModal, checkUpdateSilently } = useUpdater()
-
-onMounted(() => {
-  checkUpdateSilently()
-})
 
 onActivated(() => {
   checkAndExecuteUrlQuery()
@@ -1326,53 +1309,6 @@ const formatMdToHtml = (textSource: string) => {
   color: var(--text-main);
 }
 
-.nav-update-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.38rem 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  transition: all 0.15s ease;
-}
-
-.nav-update-btn:hover {
-  color: var(--text-main);
-  border-color: var(--border-strong);
-  background-color: var(--bg-surface-hover);
-}
-
-.nav-update-btn.has-new-update {
-  border-color: rgba(59, 130, 246, 0.4);
-  color: var(--primary);
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--bg-surface) 100%);
-}
-
-.update-pulse-dot {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: #ef4444;
-  box-shadow: 0 0 0 2px var(--bg-surface);
-  animation: pulseDot 1.8s infinite;
-}
-
-@keyframes pulseDot {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-}
 
 .theme-toggle-btn {
   display: inline-flex;
@@ -2258,7 +2194,6 @@ html.dark .dark-spinner {
 @media (max-width: 640px) {
   /* 顶部导航按钮：375 和 425 尺寸下仅显示图标，隐藏文字 */
   .nav-bookmarklet-btn span,
-  .nav-update-btn span,
   .nav-logout-btn span,
   .theme-toggle-btn span,
   .nav-switch-btn span {
@@ -2266,7 +2201,6 @@ html.dark .dark-spinner {
   }
 
   .nav-bookmarklet-btn,
-  .nav-update-btn,
   .nav-logout-btn,
   .theme-toggle-btn,
   .nav-switch-btn {

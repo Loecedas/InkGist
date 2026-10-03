@@ -4,6 +4,8 @@ import { randomBytes, pbkdf2Sync, randomUUID, createHmac } from 'crypto'
 import * as dns from 'dns/promises'
 import type { H3Event } from 'h3'
 import { getCookie } from 'h3'
+import { encryptField, decryptField, createBlindIndex } from './db-crypto.ts'
+import { getSqliteDb } from './sqlite-db.ts'
 
 // =============================================================================
 // 0. API 限流与防刷引擎 (Sliding Window In-Memory Rate Limiter)
@@ -318,9 +320,8 @@ export const createSession = async (userId: string, event?: H3Event): Promise<st
     await ensureD1Tables(d1)
     await d1.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(token, userId, expiresAt).run()
   } else {
-    const sessions = readJson<SessionRow[]>(SESSIONS_FILE)
-    sessions.push({ token, user_id: userId, expires_at: expiresAt })
-    writeJson(SESSIONS_FILE, sessions)
+    const db = getSqliteDb()
+    db.prepare('INSERT OR REPLACE INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt)
   }
   return token
 }
@@ -332,8 +333,8 @@ export const destroySession = async (token: string, event?: H3Event): Promise<vo
     await ensureD1Tables(d1)
     await d1.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run()
   } else {
-    const sessions = readJson<SessionRow[]>(SESSIONS_FILE)
-    writeJson(SESSIONS_FILE, sessions.filter(s => s.token !== token))
+    const db = getSqliteDb()
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
   }
 }
 
@@ -342,7 +343,7 @@ export const getUserBySession = async (token: string, event?: H3Event): Promise<
   const now = Date.now()
   const d1 = getD1Database(event)
 
-  // 1. 优先查数据库/存储文件中的 Session 记录
+  // 1. 优先查数据库中的 Session 记录
   if (d1) {
     await ensureD1Tables(d1)
     const session = await d1.prepare('SELECT * FROM sessions WHERE token = ?').bind(token).first()
@@ -356,21 +357,20 @@ export const getUserBySession = async (token: string, event?: H3Event): Promise<
       return { id: String(user.id), username: String(user.username), created_at: String(user.created_at) }
     }
   } else {
-    const sessions = readJson<SessionRow[]>(SESSIONS_FILE)
-    const session = sessions.find(s => s.token === token)
+    const db = getSqliteDb()
+    const session = db.prepare('SELECT * FROM sessions WHERE token = ?').get(token) as SessionRow | undefined
     if (session) {
       if (session.expires_at < now) {
         await destroySession(token, event)
         return null
       }
-      const users = readJson<UserRow[]>(USERS_FILE)
-      const user = users.find(u => u.id === session.user_id)
+      const user = db.prepare('SELECT id, username, created_at FROM users WHERE id = ?').get(session.user_id) as UserRow | undefined
       if (!user) return null
       return { id: user.id, username: user.username, created_at: user.created_at }
     }
   }
 
-  // 2. 无状态签名兜底（即使 sessions.json 重置或 Serverless 冷启动无共享状态，只要签名合法且未过期即可恢复免登态）
+  // 2. 无状态签名兜底（即使会话被清空或冷启动，只要签名合法且未过期即可恢复免登态）
   const parts = token.split('.')
   if (parts.length === 4) {
     const [nonce, userId, expiresAtStr, sig] = parts
@@ -474,8 +474,9 @@ export const dbUsers = {
       const res = await d1.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').bind(username.trim()).first()
       return (res as UserRow) || null
     }
-    const users = readJson<UserRow[]>(USERS_FILE)
-    return users.find(u => u.username.toLowerCase() === username.toLowerCase()) || null
+    const db = getSqliteDb()
+    const res = db.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').get(username.trim()) as UserRow | undefined
+    return res || null
   },
   findById: async (userId: string, event?: H3Event): Promise<UserRow | null> => {
     const d1 = getD1Database(event)
@@ -484,8 +485,9 @@ export const dbUsers = {
       const res = await d1.prepare('SELECT * FROM users WHERE id = ?').bind(userId).first()
       return (res as UserRow) || null
     }
-    const users = readJson<UserRow[]>(USERS_FILE)
-    return users.find(u => u.id === userId) || null
+    const db = getSqliteDb()
+    const res = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined
+    return res || null
   },
   insert: async (user: UserRow, event?: H3Event): Promise<void> => {
     const d1 = getD1Database(event)
@@ -494,9 +496,8 @@ export const dbUsers = {
       await d1.prepare('INSERT INTO users (id, username, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, user.username, user.password_hash, user.salt, user.created_at).run()
       return
     }
-    const users = readJson<UserRow[]>(USERS_FILE)
-    users.push(user)
-    writeJson(USERS_FILE, users)
+    const db = getSqliteDb()
+    db.prepare('INSERT INTO users (id, username, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?)').run(user.id, user.username, user.password_hash, user.salt, user.created_at)
   },
   updatePassword: async (userId: string, hash: string, salt: string, event?: H3Event): Promise<void> => {
     const d1 = getD1Database(event)
@@ -505,15 +506,39 @@ export const dbUsers = {
       await d1.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').bind(hash, salt, userId).run()
       return
     }
-    const users = readJson<UserRow[]>(USERS_FILE)
-    const target = users.find(u => u.id === userId)
-    if (target) {
-      target.password_hash = hash
-      target.salt = salt
-      writeJson(USERS_FILE, users)
+    const db = getSqliteDb()
+    db.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').run(hash, salt, userId)
+  },
+  clearPassword: async (userId: string, event?: H3Event): Promise<{ temporaryPassword: string }> => {
+    const tempPassword = randomBytes(6).toString('hex')
+    const { hash, salt } = hashPassword(tempPassword)
+    await dbUsers.updatePassword(userId, hash, salt, event)
+    const d1 = getD1Database(event)
+    if (d1) {
+      await d1.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run()
+    } else {
+      const db = getSqliteDb()
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId)
     }
+    return { temporaryPassword: tempPassword }
   }
 }
+
+const mapRowToBookmark = (r: any): BookmarkRow => ({
+  id: r.id,
+  user_id: r.user_id,
+  title: decryptField(r.title),
+  url: decryptField(r.url),
+  icon: decryptField(r.icon) || 'bookmark',
+  description: decryptField(r.description) || '',
+  summary: decryptField(r.summary) || '',
+  tags: safeJsonParse<string[]>(decryptField(r.tags), []),
+  folder: r.folder ? decryptField(r.folder) : undefined,
+  color: r.color || '#0f172a',
+  is_pinned: Boolean(r.is_pinned),
+  is_favorite: Boolean(r.is_favorite),
+  created_at: r.created_at
+})
 
 export const dbBookmarks = {
   findByUser: async (userId: string, event?: H3Event): Promise<BookmarkRow[]> => {
@@ -521,44 +546,63 @@ export const dbBookmarks = {
     if (d1) {
       await ensureD1Tables(d1)
       const { results } = await d1.prepare('SELECT * FROM bookmarks WHERE user_id = ? ORDER BY is_pinned DESC, rowid DESC').bind(userId).all()
-      return (results || []).map((r: any) => ({
-        ...r,
-        tags: safeJsonParse<string[]>(r.tags, []),
-        is_pinned: Boolean(r.is_pinned),
-        is_favorite: Boolean(r.is_favorite)
-      }))
+      return (results || []).map(mapRowToBookmark)
     }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    return bookmarks.filter(b => b.user_id === userId)
+    const db = getSqliteDb()
+    const rows = db.prepare('SELECT * FROM bookmarks WHERE user_id = ? ORDER BY is_pinned DESC, rowid DESC').all(userId) as any[]
+    return rows.map(mapRowToBookmark)
   },
   findByUserAndUrl: async (userId: string, url: string, event?: H3Event): Promise<BookmarkRow | null> => {
     const cleanUrl = (url || '').trim()
-    const d1 = getD1Database(event)
-    if (d1) {
-      await ensureD1Tables(d1)
-      const res = await d1.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND (url = ? OR lower(url) = lower(?))').bind(userId, cleanUrl, cleanUrl).first()
-      if (!res) return null
-      return {
-        ...res,
-        tags: safeJsonParse<string[]>(res.tags, []),
-        is_pinned: Boolean(res.is_pinned),
-        is_favorite: Boolean(res.is_favorite)
-      } as BookmarkRow
-    }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
+    const urlHash = createBlindIndex(cleanUrl)
     const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
     const targetNorm = norm(cleanUrl)
-    return bookmarks.find(b => b.user_id === userId && (b.url === cleanUrl || norm(b.url) === targetNorm)) || null
-  },
-  upsert: async (bm: BookmarkRow, event?: H3Event): Promise<void> => {
+
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      await d1.prepare(`INSERT INTO bookmarks (id, user_id, title, url, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      let res = await d1.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND url_hash = ?').bind(userId, urlHash).first()
+      if (!res) {
+        const { results } = await d1.prepare('SELECT * FROM bookmarks WHERE user_id = ?').bind(userId).all()
+        res = (results || []).find((r: any) => {
+          const decUrl = decryptField(r.url)
+          return decUrl === cleanUrl || norm(decUrl) === targetNorm
+        })
+      }
+      return res ? mapRowToBookmark(res) : null
+    }
+
+    const db = getSqliteDb()
+    let res = db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND url_hash = ?').get(userId, urlHash) as any
+    if (!res) {
+      const rows = db.prepare('SELECT * FROM bookmarks WHERE user_id = ?').all(userId) as any[]
+      res = rows.find(r => {
+        const decUrl = decryptField(r.url)
+        return decUrl === cleanUrl || norm(decUrl) === targetNorm
+      })
+    }
+    return res ? mapRowToBookmark(res) : null
+  },
+  upsert: async (bm: BookmarkRow, event?: H3Event): Promise<void> => {
+    const encTitle = encryptField(bm.title)
+    const encUrl = encryptField(bm.url)
+    const urlHash = createBlindIndex(bm.url)
+    const encIcon = encryptField(bm.icon || 'bookmark')
+    const encDesc = encryptField(bm.description || '')
+    const encSummary = encryptField(bm.summary || '')
+    const encTags = encryptField(JSON.stringify(bm.tags || []))
+    const encFolder = bm.folder ? encryptField(bm.folder) : null
+    const createdAt = bm.created_at || new Date().toISOString()
+
+    const d1 = getD1Database(event)
+    if (d1) {
+      await ensureD1Tables(d1)
+      await d1.prepare(`INSERT INTO bookmarks (id, user_id, title, url, url_hash, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           url = excluded.url,
+          url_hash = excluded.url_hash,
           icon = excluded.icon,
           description = excluded.description,
           summary = excluded.summary,
@@ -570,77 +614,148 @@ export const dbBookmarks = {
       ).bind(
         bm.id,
         bm.user_id,
-        bm.title,
-        bm.url,
-        bm.icon || 'bookmark',
-        bm.description || '',
-        bm.summary || '',
-        JSON.stringify(bm.tags || []),
-        bm.folder || null,
+        encTitle,
+        encUrl,
+        urlHash,
+        encIcon,
+        encDesc,
+        encSummary,
+        encTags,
+        encFolder,
         bm.color || '#0f172a',
         bm.is_pinned ? 1 : 0,
         bm.is_favorite ? 1 : 0,
-        bm.created_at
+        createdAt
       ).run()
       return
     }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    const index = bookmarks.findIndex(b => (b.id === bm.id || (b.url === bm.url && b.user_id === bm.user_id)) && b.user_id === bm.user_id)
-    if (index !== -1) bookmarks[index] = bm
-    else bookmarks.unshift(bm)
-    writeJson(BOOKMARKS_FILE, bookmarks)
+
+    const db = getSqliteDb()
+    const existing = db.prepare('SELECT id FROM bookmarks WHERE user_id = ? AND (id = ? OR url_hash = ?)').get(bm.user_id, bm.id, urlHash) as any
+    const finalId = existing?.id || bm.id
+    db.prepare(`
+      INSERT INTO bookmarks (id, user_id, title, url, url_hash, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        url = excluded.url,
+        url_hash = excluded.url_hash,
+        icon = excluded.icon,
+        description = excluded.description,
+        summary = excluded.summary,
+        tags = excluded.tags,
+        folder = excluded.folder,
+        color = excluded.color,
+        is_pinned = excluded.is_pinned,
+        is_favorite = excluded.is_favorite
+    `).run(
+      finalId,
+      bm.user_id,
+      encTitle,
+      encUrl,
+      urlHash,
+      encIcon,
+      encDesc,
+      encSummary,
+      encTags,
+      encFolder,
+      bm.color || '#0f172a',
+      bm.is_pinned ? 1 : 0,
+      bm.is_favorite ? 1 : 0,
+      createdAt
+    )
   },
   batchUpsert: async (bms: BookmarkRow[], userId: string, event?: H3Event): Promise<number> => {
     if (!bms || bms.length === 0) return 0
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      const stmts = bms.map(bm => d1.prepare(`INSERT INTO bookmarks (id, user_id, title, url, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          url = excluded.url,
-          icon = excluded.icon,
-          description = excluded.description,
-          summary = excluded.summary,
-          tags = excluded.tags,
-          folder = excluded.folder,
-          color = excluded.color,
-          is_pinned = excluded.is_pinned,
-          is_favorite = excluded.is_favorite`
-      ).bind(
-        bm.id,
-        userId,
-        bm.title,
-        bm.url,
-        bm.icon || 'bookmark',
-        bm.description || '',
-        bm.summary || '',
-        JSON.stringify(bm.tags || []),
-        bm.folder || null,
-        bm.color || '#0f172a',
-        bm.is_pinned ? 1 : 0,
-        bm.is_favorite ? 1 : 0,
-        bm.created_at
-      ))
+      const stmts = bms.map(bm => {
+        const urlHash = createBlindIndex(bm.url)
+        return d1.prepare(`INSERT INTO bookmarks (id, user_id, title, url, url_hash, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            url = excluded.url,
+            url_hash = excluded.url_hash,
+            icon = excluded.icon,
+            description = excluded.description,
+            summary = excluded.summary,
+            tags = excluded.tags,
+            folder = excluded.folder,
+            color = excluded.color,
+            is_pinned = excluded.is_pinned,
+            is_favorite = excluded.is_favorite`
+        ).bind(
+          bm.id,
+          userId,
+          encryptField(bm.title),
+          encryptField(bm.url),
+          urlHash,
+          encryptField(bm.icon || 'bookmark'),
+          encryptField(bm.description || ''),
+          encryptField(bm.summary || ''),
+          encryptField(JSON.stringify(bm.tags || [])),
+          bm.folder ? encryptField(bm.folder) : null,
+          bm.color || '#0f172a',
+          bm.is_pinned ? 1 : 0,
+          bm.is_favorite ? 1 : 0,
+          bm.created_at || new Date().toISOString()
+        )
+      })
       for (let i = 0; i < stmts.length; i += 50) {
         await d1.batch(stmts.slice(i, i + 50))
       }
       return bms.length
     }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
-    for (const bm of bms) {
-      bm.user_id = userId
-      const targetNorm = norm(bm.url)
-      const idx = bookmarks.findIndex(b => b.user_id === userId && (b.id === bm.id || norm(b.url) === targetNorm))
-      if (idx !== -1) {
-        bookmarks[idx] = bm
-      } else {
-        bookmarks.unshift(bm)
+
+    const db = getSqliteDb()
+    const upsertStmt = db.prepare(`
+      INSERT INTO bookmarks (id, user_id, title, url, url_hash, icon, description, summary, tags, folder, color, is_pinned, is_favorite, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        url = excluded.url,
+        url_hash = excluded.url_hash,
+        icon = excluded.icon,
+        description = excluded.description,
+        summary = excluded.summary,
+        tags = excluded.tags,
+        folder = excluded.folder,
+        color = excluded.color,
+        is_pinned = excluded.is_pinned,
+        is_favorite = excluded.is_favorite
+    `)
+    const findExistingStmt = db.prepare('SELECT id FROM bookmarks WHERE user_id = ? AND (id = ? OR url_hash = ?)')
+
+    db.exec('BEGIN TRANSACTION')
+    try {
+      for (const bm of bms) {
+        const urlHash = createBlindIndex(bm.url)
+        const existing = findExistingStmt.get(userId, bm.id, urlHash) as any
+        const finalId = existing?.id || bm.id
+        upsertStmt.run(
+          finalId,
+          userId,
+          encryptField(bm.title),
+          encryptField(bm.url),
+          urlHash,
+          encryptField(bm.icon || 'bookmark'),
+          encryptField(bm.description || ''),
+          encryptField(bm.summary || ''),
+          encryptField(JSON.stringify(bm.tags || [])),
+          bm.folder ? encryptField(bm.folder) : null,
+          bm.color || '#0f172a',
+          bm.is_pinned ? 1 : 0,
+          bm.is_favorite ? 1 : 0,
+          bm.created_at || new Date().toISOString()
+        )
       }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
     }
-    writeJson(BOOKMARKS_FILE, bookmarks)
     return bms.length
   },
   delete: async (id: string, userId: string, event?: H3Event): Promise<boolean> => {
@@ -656,40 +771,56 @@ export const dbBookmarks = {
         return false
       }
     }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    const initialLen = bookmarks.length
-    const filtered = bookmarks.filter(b => !(b.id === String(id) && b.user_id === String(userId)))
-    if (filtered.length !== initialLen) {
-      writeJson(BOOKMARKS_FILE, filtered)
-      return true
-    }
-    return false
+    const db = getSqliteDb()
+    const res = db.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').run(String(id), String(userId))
+    return res.changes > 0
   },
   deleteByUrl: async (url: string, userId: string, event?: H3Event): Promise<boolean> => {
     if (!url || !userId) return false
     const cleanUrl = (url || '').trim()
+    const urlHash = createBlindIndex(cleanUrl)
+
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
       try {
-        const altUrl = cleanUrl.endsWith('/') ? cleanUrl.slice(0, -1) : cleanUrl + '/'
-        const res = await d1.prepare('DELETE FROM bookmarks WHERE user_id = ? AND (url = ? OR url = ? OR lower(url) = lower(?) OR lower(url) = lower(?))').bind(String(userId), cleanUrl, altUrl, cleanUrl, altUrl).run()
-        return Boolean(res?.meta?.changes && res.meta.changes > 0)
+        const res = await d1.prepare('DELETE FROM bookmarks WHERE user_id = ? AND url_hash = ?').bind(String(userId), urlHash).run()
+        if (Boolean(res?.meta?.changes && res.meta.changes > 0)) return true
+        // 兜底查出比对 URL 删除
+        const { results } = await d1.prepare('SELECT id, url FROM bookmarks WHERE user_id = ?').bind(String(userId)).all()
+        const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
+        const targetNorm = norm(cleanUrl)
+        for (const r of (results || [])) {
+          const decUrl = decryptField(r.url)
+          if (decUrl === cleanUrl || norm(decUrl) === targetNorm) {
+            await d1.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').bind(r.id, String(userId)).run()
+            return true
+          }
+        }
+        return false
       } catch (err) {
         console.error('D1 deleteByUrl error:', err)
         return false
       }
     }
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
+
+    const db = getSqliteDb()
+    const res = db.prepare('DELETE FROM bookmarks WHERE user_id = ? AND url_hash = ?').run(String(userId), urlHash)
+    if (res.changes > 0) return true
+
+    // 兼容历史未建立盲索引的数据：全解密比对删除
+    const rows = db.prepare('SELECT id, url FROM bookmarks WHERE user_id = ?').all(String(userId)) as any[]
     const norm = (u: string) => (u || '').trim().replace(/\/+$/, '').toLowerCase()
     const targetNorm = norm(cleanUrl)
-    const initialLen = bookmarks.length
-    const filtered = bookmarks.filter(b => !(b.user_id === String(userId) && (b.url === cleanUrl || norm(b.url) === targetNorm)))
-    if (filtered.length !== initialLen) {
-      writeJson(BOOKMARKS_FILE, filtered)
-      return true
+    let deleted = false
+    for (const r of rows) {
+      const decUrl = decryptField(r.url)
+      if (decUrl === cleanUrl || norm(decUrl) === targetNorm) {
+        db.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').run(r.id, String(userId))
+        deleted = true
+      }
     }
-    return false
+    return deleted
   }
 }
 
@@ -699,144 +830,195 @@ export const dbFolders = {
     if (d1) {
       await ensureD1Tables(d1)
       const { results } = await d1.prepare('SELECT * FROM folders WHERE user_id = ?').bind(userId).all()
-      return (results as FolderRow[]) || []
+      return (results || []).map((r: any) => ({
+        id: r.id,
+        user_id: r.user_id,
+        name: decryptField(r.name),
+        created_at: r.created_at
+      }))
     }
-    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    return folders.filter(f => f.user_id === userId)
+    const db = getSqliteDb()
+    const rows = db.prepare('SELECT * FROM folders WHERE user_id = ?').all(userId) as any[]
+    return rows.map((r: any) => ({
+      id: r.id,
+      user_id: r.user_id,
+      name: decryptField(r.name),
+      created_at: r.created_at
+    }))
   },
   insert: async (folder: FolderRow, event?: H3Event): Promise<void> => {
+    const existing = await dbFolders.findByUser(folder.user_id, event)
+    if (existing.some(f => f.name === folder.name)) return
+
+    const encName = encryptField(folder.name)
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      await d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(folder.id, folder.user_id, folder.name, folder.created_at).run()
+      await d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(folder.id, folder.user_id, encName, folder.created_at).run()
       return
     }
-    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    if (!folders.some(f => f.user_id === folder.user_id && f.name === folder.name)) {
-      folders.push(folder)
-      writeJson(FOLDERS_FILE, folders)
-    }
+    const db = getSqliteDb()
+    db.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').run(folder.id, folder.user_id, encName, folder.created_at)
   },
   batchInsert: async (newFolders: FolderRow[], userId: string, event?: H3Event): Promise<number> => {
     if (!newFolders || newFolders.length === 0) return 0
+    const existing = await dbFolders.findByUser(userId, event)
+    const existingNames = new Set(existing.map(f => f.name))
+    const toInsert = newFolders.filter(f => !existingNames.has(f.name))
+    if (toInsert.length === 0) return 0
+
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      const stmts = newFolders.map(f => d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(f.id, userId, f.name, f.created_at))
+      const stmts = toInsert.map(f => d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(f.id, userId, encryptField(f.name), f.created_at))
       for (let i = 0; i < stmts.length; i += 50) {
         await d1.batch(stmts.slice(i, i + 50))
       }
-      return newFolders.length
+      return toInsert.length
     }
-    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    let added = 0
-    for (const f of newFolders) {
-      f.user_id = userId
-      if (!folders.some(existing => existing.user_id === userId && existing.name === f.name)) {
-        folders.push(f)
-        added++
+
+    const db = getSqliteDb()
+    const stmt = db.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)')
+    db.exec('BEGIN TRANSACTION')
+    try {
+      for (const f of toInsert) {
+        stmt.run(f.id, userId, encryptField(f.name), f.created_at)
       }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
     }
-    if (added > 0) {
-      writeJson(FOLDERS_FILE, folders)
-    }
-    return added
+    return toInsert.length
   },
   delete: async (name: string, userId: string, event?: H3Event): Promise<void> => {
+    const folders = await dbFolders.findByUser(userId, event)
+    const targetFolderIds = folders
+      .filter(f => f.name === name || f.name.startsWith(name + '/'))
+      .map(f => f.id)
+
+    const bookmarks = await dbBookmarks.findByUser(userId, event)
+    const toUpdateBookmarks = bookmarks.filter(b => b.folder && (b.folder === name || b.folder.startsWith(name + '/')))
+
     const d1 = getD1Database(event)
-    const prefix = name + '/%'
     if (d1) {
       await ensureD1Tables(d1)
-      await d1.batch([
-        d1.prepare('DELETE FROM folders WHERE (name = ? OR name LIKE ?) AND user_id = ?').bind(name, prefix, userId),
-        d1.prepare('UPDATE bookmarks SET folder = NULL WHERE (folder = ? OR folder LIKE ?) AND user_id = ?').bind(name, prefix, userId)
-      ])
+      const stmts: any[] = []
+      for (const fid of targetFolderIds) {
+        stmts.push(d1.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').bind(fid, userId))
+      }
+      for (const b of toUpdateBookmarks) {
+        stmts.push(d1.prepare('UPDATE bookmarks SET folder = NULL WHERE id = ? AND user_id = ?').bind(b.id, userId))
+      }
+      if (stmts.length > 0) {
+        for (let i = 0; i < stmts.length; i += 50) {
+          await d1.batch(stmts.slice(i, i + 50))
+        }
+      }
       return
     }
-    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    writeJson(FOLDERS_FILE, folders.filter(f => !(f.user_id === userId && (f.name === name || f.name.startsWith(name + '/')))))
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    let changed = false
-    bookmarks.forEach(b => {
-      if (b.user_id === userId && b.folder && (b.folder === name || b.folder.startsWith(name + '/'))) {
-        b.folder = undefined
-        changed = true
+
+    const db = getSqliteDb()
+    db.exec('BEGIN TRANSACTION')
+    try {
+      for (const fid of targetFolderIds) {
+        db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(fid, userId)
       }
-    })
-    if (changed) writeJson(BOOKMARKS_FILE, bookmarks)
+      for (const b of toUpdateBookmarks) {
+        db.prepare('UPDATE bookmarks SET folder = NULL WHERE id = ? AND user_id = ?').run(b.id, userId)
+      }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
   },
   rename: async (oldName: string, newName: string, userId: string, event?: H3Event): Promise<void> => {
-    const d1 = getD1Database(event)
-    if (d1) {
-      await ensureD1Tables(d1)
-      const oldPrefix = oldName + '/%'
-      const { results: subFolders } = await d1.prepare('SELECT id, name FROM folders WHERE name LIKE ? AND user_id = ?').bind(oldPrefix, userId).all()
-      const { results: subBookmarks } = await d1.prepare('SELECT id, folder FROM bookmarks WHERE folder LIKE ? AND user_id = ?').bind(oldPrefix, userId).all()
+    const folders = await dbFolders.findByUser(userId, event)
+    const bookmarks = await dbBookmarks.findByUser(userId, event)
+    const now = new Date().toISOString()
 
-      const stmts: any[] = [
-        d1.prepare('UPDATE folders SET name = ? WHERE name = ? AND user_id = ?').bind(newName, oldName, userId),
-        d1.prepare('UPDATE bookmarks SET folder = ? WHERE folder = ? AND user_id = ?').bind(newName, oldName, userId)
-      ]
-
-      if (Array.isArray(subFolders)) {
-        for (const sf of subFolders) {
-          const updated = newName + (sf.name as string).slice(oldName.length)
-          stmts.push(d1.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').bind(updated, sf.id, userId))
-        }
+    // 1. 文件夹名称层级级联更新
+    const folderUpdates: { id: string; name: string }[] = []
+    const updatedNames: string[] = []
+    for (const f of folders) {
+      if (f.name === oldName) {
+        folderUpdates.push({ id: f.id, name: newName })
+        updatedNames.push(newName)
+      } else if (f.name.startsWith(oldName + '/')) {
+        const nextName = newName + f.name.slice(oldName.length)
+        folderUpdates.push({ id: f.id, name: nextName })
+        updatedNames.push(nextName)
+      } else {
+        updatedNames.push(f.name)
       }
-      if (Array.isArray(subBookmarks)) {
-        for (const sb of subBookmarks) {
-          const updated = newName + (sb.folder as string).slice(oldName.length)
-          stmts.push(d1.prepare('UPDATE bookmarks SET folder = ? WHERE id = ? AND user_id = ?').bind(updated, sb.id, userId))
-        }
-      }
-
-      await d1.batch(stmts)
-      return
     }
 
-    const folders = readJson<FolderRow[]>(FOLDERS_FILE)
-    const now = new Date().toISOString()
-    folders.forEach(f => {
-      if (f.user_id === userId) {
-        if (f.name === oldName) {
-          f.name = newName
-        } else if (f.name.startsWith(oldName + '/')) {
-          f.name = newName + f.name.slice(oldName.length)
-        }
-      }
-    })
-
-    // 确保新路径的祖先目录存在
+    // 补齐新层级的祖先目录
+    const ancestorInserts: FolderRow[] = []
     if (newName.includes('/')) {
       const parts = newName.split('/')
       let cur = ''
       for (let i = 0; i < parts.length - 1; i++) {
         cur = cur ? `${cur}/${parts[i]}` : parts[i]
-        if (!folders.some(f => f.user_id === userId && f.name === cur)) {
-          folders.push({ id: 'f_' + randomUUID(), user_id: userId, name: cur, created_at: now })
+        if (!updatedNames.includes(cur) && !ancestorInserts.some(a => a.name === cur)) {
+          ancestorInserts.push({ id: 'f_' + randomUUID(), user_id: userId, name: cur, created_at: now })
         }
       }
     }
-    writeJson(FOLDERS_FILE, folders)
 
-    const bookmarks = readJson<BookmarkRow[]>(BOOKMARKS_FILE)
-    let changed = false
-    bookmarks.forEach(b => {
-      if (b.user_id === userId && b.folder) {
+    // 2. 书签所属分类级联更新
+    const bookmarkUpdates: { id: string; folder: string }[] = []
+    for (const b of bookmarks) {
+      if (b.folder) {
         if (b.folder === oldName) {
-          b.folder = newName
-          changed = true
+          bookmarkUpdates.push({ id: b.id, folder: newName })
         } else if (b.folder.startsWith(oldName + '/')) {
-          b.folder = newName + b.folder.slice(oldName.length)
-          changed = true
+          bookmarkUpdates.push({ id: b.id, folder: newName + b.folder.slice(oldName.length) })
         }
       }
-    })
-    if (changed) writeJson(BOOKMARKS_FILE, bookmarks)
+    }
+
+    const d1 = getD1Database(event)
+    if (d1) {
+      await ensureD1Tables(d1)
+      const stmts: any[] = []
+      for (const fu of folderUpdates) {
+        stmts.push(d1.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').bind(encryptField(fu.name), fu.id, userId))
+      }
+      for (const anc of ancestorInserts) {
+        stmts.push(d1.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(anc.id, userId, encryptField(anc.name), anc.created_at))
+      }
+      for (const bu of bookmarkUpdates) {
+        stmts.push(d1.prepare('UPDATE bookmarks SET folder = ? WHERE id = ? AND user_id = ?').bind(encryptField(bu.folder), bu.id, userId))
+      }
+      if (stmts.length > 0) {
+        for (let i = 0; i < stmts.length; i += 50) {
+          await d1.batch(stmts.slice(i, i + 50))
+        }
+      }
+      return
+    }
+
+    const db = getSqliteDb()
+    db.exec('BEGIN TRANSACTION')
+    try {
+      for (const fu of folderUpdates) {
+        db.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').run(encryptField(fu.name), fu.id, userId)
+      }
+      for (const anc of ancestorInserts) {
+        db.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').run(anc.id, userId, encryptField(anc.name), anc.created_at)
+      }
+      for (const bu of bookmarkUpdates) {
+        db.prepare('UPDATE bookmarks SET folder = ? WHERE id = ? AND user_id = ?').run(encryptField(bu.folder), bu.id, userId)
+      }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
   },
   reorder: async (folderNames: string[], userId: string, event?: H3Event): Promise<void> => {
-    // 自动补齐所有文件夹名称的祖先目录，确保层级结构不丢失
     const completeNames: string[] = []
     const seen = new Set<string>()
     for (const name of folderNames) {
@@ -857,22 +1039,22 @@ export const dbFolders = {
       }
     }
 
+    const existingRows = await dbFolders.findByUser(userId, event)
+    const map = new Map<string, FolderRow>()
+    for (const row of existingRows) {
+      map.set(row.name, row)
+    }
+
+    const now = new Date().toISOString()
     const d1 = getD1Database(event)
     if (d1) {
       await ensureD1Tables(d1)
-      const existing = await d1.prepare('SELECT * FROM folders WHERE user_id = ?').bind(userId).all()
-      const existingRows = (existing.results as FolderRow[]) || []
-      const map = new Map<string, FolderRow>()
-      for (const row of existingRows) {
-        map.set(row.name, row)
-      }
       const stmts: any[] = [d1.prepare('DELETE FROM folders WHERE user_id = ?').bind(userId)]
-      const now = new Date().toISOString()
       for (const name of completeNames) {
         const row = map.get(name)
         const id = row?.id || ('f_' + randomUUID())
         const createdAt = row?.created_at || now
-        stmts.push(d1.prepare('INSERT INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, userId, name, createdAt))
+        stmts.push(d1.prepare('INSERT INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)').bind(id, userId, encryptField(name), createdAt))
       }
       for (let i = 0; i < stmts.length; i += 50) {
         await d1.batch(stmts.slice(i, i + 50))
@@ -880,31 +1062,22 @@ export const dbFolders = {
       return
     }
 
-    const allFolders = readJson<FolderRow[]>(FOLDERS_FILE)
-    const userFolders = allFolders.filter(f => f.user_id === userId)
-    const otherFolders = allFolders.filter(f => f.user_id !== userId)
-    const map = new Map<string, FolderRow>()
-    for (const f of userFolders) {
-      map.set(f.name, f)
-    }
-
-    const reordered: FolderRow[] = []
-    const now = new Date().toISOString()
-    for (const name of completeNames) {
-      const existing = map.get(name)
-      if (existing) {
-        reordered.push(existing)
-        map.delete(name)
-      } else {
-        reordered.push({ id: 'f_' + randomUUID(), user_id: userId, name, created_at: now })
+    const db = getSqliteDb()
+    db.exec('BEGIN TRANSACTION')
+    try {
+      db.prepare('DELETE FROM folders WHERE user_id = ?').run(userId)
+      const insertStmt = db.prepare('INSERT INTO folders (id, user_id, name, created_at) VALUES (?, ?, ?, ?)')
+      for (const name of completeNames) {
+        const row = map.get(name)
+        const id = row?.id || ('f_' + randomUUID())
+        const createdAt = row?.created_at || now
+        insertStmt.run(id, userId, encryptField(name), createdAt)
       }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
     }
-    // 补齐未在列表中的其它已有文件夹
-    for (const remaining of map.values()) {
-      reordered.push(remaining)
-    }
-
-    writeJson(FOLDERS_FILE, [...otherFolders, ...reordered])
   }
 }
 

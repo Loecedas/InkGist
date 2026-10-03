@@ -248,18 +248,13 @@
 
     <!-- 小书签安装弹窗 -->
     <BookmarkletModal v-model="showBookmarkletModal" default-tab="snapshot" />
-
-    <!-- 系统自动检测与在线升级弹窗 -->
-    <UpdateModal />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { ICONS, useSnapshots, useTheme, type SnapshotItem } from './state'
-import { useUpdater } from '../utils/updater'
 import BookmarkletModal from '../components/BookmarkletModal.vue'
-import UpdateModal from '../components/UpdateModal.vue'
 
 definePageMeta({
   keepalive: true
@@ -267,11 +262,6 @@ definePageMeta({
 
 const { themeMode, cycleTheme } = useTheme()
 const { snapshots, addSnapshot, deleteSnapshot } = useSnapshots()
-const { versionInfo, openUpdateModal, checkUpdateSilently } = useUpdater()
-
-onMounted(() => {
-  checkUpdateSilently()
-})
 
 const currentLabel = computed(() => {
   if (themeMode.value === 'light') return '浅色'
@@ -589,35 +579,6 @@ const handleDelete = async (item: SnapshotItem) => {
   background-color: var(--primary);
   color: var(--primary-contrast);
   border-color: var(--primary);
-}
-
-.nav-update-btn-header {
-  position: relative;
-  font-weight: 600;
-}
-
-.nav-update-btn-header.has-new {
-  border-color: rgba(59, 130, 246, 0.4);
-  color: var(--primary);
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--bg-surface) 100%);
-}
-
-.update-pulse-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: #ef4444;
-  box-shadow: 0 0 0 2px var(--bg-surface);
-  animation: pulseDot 1.8s infinite;
-}
-
-@keyframes pulseDot {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 .theme-toggle-btn {

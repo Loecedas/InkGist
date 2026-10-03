@@ -53,12 +53,12 @@ export default defineEventHandler(async (event) => {
     const cleanUsername = userCheck.clean
     const user = await dbUsers.findByName(cleanUsername, event)
     if (!user) {
-      throw createError({ statusCode: 401, statusMessage: '用户名不存在，请检查或先注册' })
+      throw createError({ statusCode: 401, statusMessage: '用户名或密码错误，请检查后重试' })
     }
 
     const { valid, needsRehash } = verifyPassword(String(password), user.password_hash, user.salt)
     if (!valid) {
-      throw createError({ statusCode: 401, statusMessage: '密码错误，请重新输入' })
+      throw createError({ statusCode: 401, statusMessage: '用户名或密码错误，请检查后重试' })
     }
 
     // 若旧用户使用旧版 1000 次哈希，在登录成功时自动平滑升级为 100,000 次 OWASP 标准哈希
@@ -81,54 +81,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // 3. 用户注册 POST /api/auth/register
+  // 3. 用户注册 POST /api/auth/register (注册通道已关闭)
   if (action === 'register' && method === 'POST') {
-    // 注册防刷限流：每个 IP 10 分钟内最多注册 5 个账号
-    const rateCheck = checkRateLimit(`register_${clientIp}`, 5, 10 * 60 * 1000)
-    if (!rateCheck.allowed) {
-      throw createError({
-        statusCode: 429,
-        statusMessage: `注册请求过于频繁，请在 ${Math.ceil(rateCheck.resetMs / 1000)} 秒后再试`
-      })
-    }
-
-    const { username, password } = (await readBody(event)) || {}
-    const userCheck = validateUsername(String(username || ''))
-    if (!userCheck.valid) {
-      throw createError({ statusCode: 400, statusMessage: userCheck.error || '用户名不合法' })
-    }
-
-    if (!password || typeof password !== 'string' || password.length < 6) {
-      throw createError({ statusCode: 400, statusMessage: '密码长度至少为 6 位' })
-    }
-    if (password.length > 50) {
-      throw createError({ statusCode: 400, statusMessage: '密码长度不能超过 50 位' })
-    }
-
-    const cleanUsername = userCheck.clean
-    const existing = await dbUsers.findByName(cleanUsername, event)
-    if (existing) {
-      throw createError({ statusCode: 409, statusMessage: '该用户名已被注册，请直接登录' })
-    }
-
-    const userId = 'u_' + randomUUID()
-    const { hash, salt } = hashPassword(password) // 采用 100,000 次 OWASP 标准迭代
-    const createdAt = new Date().toISOString()
-
-    await dbUsers.insert({ id: userId, username: cleanUsername, password_hash: hash, salt, created_at: createdAt }, event)
-
-    const token = await createSession(userId, event)
-    
-    // 双轨 Cookie 持久化
-    setCookie(event, 'auth_session_token', token, getAuthCookieOptions(event, true))
-    setCookie(event, 'auth_client_token', token, getAuthCookieOptions(event, false))
-
-    return {
-      success: true,
-      message: '注册成功',
-      user: { id: userId, username: cleanUsername, createdAt },
-      token
-    }
+    throw createError({
+      statusCode: 403,
+      statusMessage: '注册通道已关闭，仅支持已有账号登录'
+    })
   }
 
   // 4. 退出登录 POST /api/auth/logout
